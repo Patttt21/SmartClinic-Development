@@ -34,8 +34,9 @@ service cloud.firestore {
       return arr is list && arr.size() <= 30 && (arr.size() == 0 || (arr[0] is string && arr[0].size() <= 128));
     }
 
-    function isBootstrapOwner() {
-      return isVerifiedUser() && request.auth.token.email.lower() == 'cervitopatrick0@gmail.com';
+    function isBootstrappedAdminUid(targetUid) {
+      return exists(/databases/$(database)/documents/bootstrap_locks/initial_admin) &&
+        get(/databases/$(database)/documents/bootstrap_locks/initial_admin).data.bootstrappedAdminUid == targetUid;
     }
 
     function emailToInviteId(email) {
@@ -43,10 +44,11 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isVerifiedUser() && (
-        isBootstrapOwner() ||
-        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
-      );
+      return isVerifiedUser() &&
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) &&
+        exists(/databases/$(database)/documents/staff_accounts/$(request.auth.uid)) &&
+        get(/databases/$(database)/documents/staff_accounts/$(request.auth.uid)).data.role == 'admin' &&
+        get(/databases/$(database)/documents/staff_accounts/$(request.auth.uid)).data.active == true;
     }
 
     function hasStaffRole(allowedRoles) {
@@ -1173,21 +1175,22 @@ service cloud.firestore {
       allow list, create, update, delete: if false;
     }
 
+    match /bootstrap_locks/{lockId} {
+      allow get: if isSignedIn() && isValidId(lockId);
+      allow list, create, update, delete: if false;
+    }
+
     match /admins/{adminUid} {
       allow get: if isSignedIn() && isValidId(adminUid) && (request.auth.uid == adminUid || isAdmin());
       allow list: if false;
       allow create: if isVerifiedUser() &&
         isValidId(adminUid) &&
+        exists(/databases/$(database)/documents/bootstrap_locks/initial_admin) &&
         isValidAdminMarker(incoming()) &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
         (
           isAdmin() ||
-          (
-            adminUid == request.auth.uid &&
-            isBootstrapOwner() &&
-            !exists(/databases/$(database)/documents/clinic_roster/current)
-          ) ||
           (
             adminUid == request.auth.uid &&
             exists(/databases/$(database)/documents/staff_invitations/$(emailToInviteId(request.auth.token.email))) &&
@@ -1202,7 +1205,10 @@ service cloud.firestore {
         incoming().updatedAt == request.time &&
         isAdmin() &&
         incoming().diff(existing()).affectedKeys().hasOnly(['email', 'updatedAt']);
-      allow delete: if isAdmin() && isValidId(adminUid) && !isBootstrapOwner();
+      allow delete: if isAdmin() &&
+        isValidId(adminUid) &&
+        adminUid != request.auth.uid &&
+        !isBootstrappedAdminUid(adminUid);
     }
 
     match /clinic_roster/{docId} {
@@ -1210,23 +1216,21 @@ service cloud.firestore {
       allow list: if false;
       allow create: if isVerifiedUser() &&
         docId == 'current' &&
+        exists(/databases/$(database)/documents/bootstrap_locks/initial_admin) &&
         isValidClinicRoster(incoming()) &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
-        (
-          isAdmin() ||
-          (isBootstrapOwner() && !exists(/databases/$(database)/documents/clinic_roster/current))
-        );
+        isAdmin();
       allow update: if isVerifiedUser() &&
         docId == 'current' &&
         isValidClinicRoster(incoming()) &&
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
+        incoming().bootstrappedAdminUid == existing().bootstrappedAdminUid &&
         (
           isAdmin() ||
           (
             isAnyActiveStaff() &&
-            incoming().bootstrappedAdminUid == existing().bootstrappedAdminUid &&
             incoming().diff(existing()).affectedKeys().hasOnly([
               'adminUids', 'doctorUids', 'nurseUids', 'receptionistUids', 'labUids', 'pharmacistUids', 'allStaffUids', 'updatedAt'
             ])
@@ -1240,18 +1244,13 @@ service cloud.firestore {
       allow list: if isSignedIn() && request.auth.uid in existing().authorizedViewerUids;
       allow create: if isVerifiedUser() &&
         isValidId(staffUid) &&
+        exists(/databases/$(database)/documents/bootstrap_locks/initial_admin) &&
         isValidStaffAccount(incoming()) &&
         incoming().uid == staffUid &&
         incoming().createdAt == request.time &&
         incoming().updatedAt == request.time &&
         (
           isAdmin() ||
-          (
-            staffUid == request.auth.uid &&
-            incoming().role == 'admin' &&
-            isBootstrapOwner() &&
-            !exists(/databases/$(database)/documents/clinic_roster/current)
-          ) ||
           (
             staffUid == request.auth.uid &&
             exists(/databases/$(database)/documents/staff_invitations/$(emailToInviteId(request.auth.token.email))) &&
@@ -1266,7 +1265,10 @@ service cloud.firestore {
         incoming().createdAt == existing().createdAt &&
         incoming().updatedAt == request.time &&
         (
-          isAdmin() ||
+          (
+            isAdmin() &&
+            (!isBootstrappedAdminUid(staffUid) || (incoming().role == 'admin' && incoming().active == true))
+          ) ||
           (
             request.auth.uid == staffUid &&
             incoming().role == existing().role &&

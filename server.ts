@@ -28,6 +28,19 @@ import {
   parseAndValidateEvaluatorCsv,
   runPredictiveAnalytics,
 } from './src/utils/forecasting.ts';
+import {
+  createLiveSupabaseStaffRepository,
+  createSupabaseStaffController,
+  isValidUuid,
+} from './src/utils/supabaseStaffBackend.ts';
+import {
+  createFirebaseAdminBootstrapController,
+  createLiveFirebaseAdminRepository,
+  FIREBASE_PROJECT_ID,
+  FIRESTORE_DATABASE_ID,
+  hasExplicitFirebaseAdminCredentials,
+  isValidFirebaseUid,
+} from './src/utils/firebaseAdminBackend.ts';
 
 dotenv.config();
 
@@ -38,6 +51,81 @@ const SERVER_SECRET =
   process.env.SMARTCLINIC_SERVER_SECRET ||
   `smartclinic-ephemeral-${crypto.createHash('sha256').update(__dirname).digest('hex')}`;
 
+function getSupabaseRuntimeEnv() {
+  const supabaseUrl = (process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || '').trim();
+  const supabaseAnonKey = (
+    process.env.SUPABASE_ANON_KEY ||
+    process.env.VITE_SUPABASE_ANON_KEY ||
+    ''
+  ).trim();
+  const serviceRoleKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+  const initialAdminUid = (process.env.SUPABASE_INITIAL_ADMIN_USER_ID || '').trim();
+  const configured = Boolean(supabaseUrl && supabaseAnonKey && serviceRoleKey);
+  return {
+    configured,
+    supabaseUrl,
+    supabaseAnonKey,
+    serviceRoleKey,
+    initialAdminUid,
+    bootstrapArmed: isValidUuid(initialAdminUid),
+  };
+}
+
+let cachedSupabaseKeySig = '';
+let cachedSupabaseController: ReturnType<typeof createSupabaseStaffController> | null = null;
+let cachedSupabaseRepo: ReturnType<typeof createLiveSupabaseStaffRepository> | null = null;
+
+function getLiveSupabaseBackend() {
+  const env = getSupabaseRuntimeEnv();
+  if (!env.configured) return null;
+  const sig = `${env.supabaseUrl}::${env.serviceRoleKey}`;
+  if (!cachedSupabaseController || !cachedSupabaseRepo || cachedSupabaseKeySig !== sig) {
+    cachedSupabaseKeySig = sig;
+    cachedSupabaseRepo = createLiveSupabaseStaffRepository(env.supabaseUrl, env.serviceRoleKey);
+    cachedSupabaseController = createSupabaseStaffController({
+      repo: cachedSupabaseRepo,
+      getInitialAdminUid: () => (process.env.SUPABASE_INITIAL_ADMIN_USER_ID || '').trim(),
+      serverSecret: SERVER_SECRET,
+    });
+  }
+  return { controller: cachedSupabaseController, repo: cachedSupabaseRepo, env };
+}
+
+let cachedFirebaseAdminController: ReturnType<typeof createFirebaseAdminBootstrapController> | null =
+  null;
+let cachedFirebaseAdminRepo: ReturnType<typeof createLiveFirebaseAdminRepository> | null = null;
+
+function getFirebaseRuntimeEnv() {
+  const adminSdkConfigured = hasExplicitFirebaseAdminCredentials();
+  const initialAdminUid = (process.env.FIREBASE_INITIAL_ADMIN_UID || '').trim();
+  const bootstrapArmed = isValidFirebaseUid(initialAdminUid);
+  return {
+    adminSdkConfigured,
+    initialAdminUid,
+    bootstrapArmed,
+    projectId: FIREBASE_PROJECT_ID,
+    firestoreDatabaseId: FIRESTORE_DATABASE_ID,
+  };
+}
+
+function getLiveFirebaseAdminBackend() {
+  const env = getFirebaseRuntimeEnv();
+  if (!env.adminSdkConfigured) return null;
+  if (!cachedFirebaseAdminController || !cachedFirebaseAdminRepo) {
+    cachedFirebaseAdminRepo = createLiveFirebaseAdminRepository();
+    cachedFirebaseAdminController = createFirebaseAdminBootstrapController({
+      repo: cachedFirebaseAdminRepo,
+      getDesignatedAdminUid: () => (process.env.FIREBASE_INITIAL_ADMIN_UID || '').trim(),
+    });
+  }
+  return { controller: cachedFirebaseAdminController, repo: cachedFirebaseAdminRepo, env };
+}
+
+function extractBearerToken(req: express.Request): string {
+  const header = String(req.headers.authorization || '');
+  return header.startsWith('Bearer ') ? header.slice(7).trim() : '';
+}
+
 // In-memory brute-force attempt limiter for MFA challenges
 const mfaAttemptMap = new Map<string, { count: number; lockedUntilMs: number }>();
 
@@ -47,11 +135,11 @@ function isLoopbackTestFixture(req: express.Request): boolean {
   return ip === '127.0.0.1' || ip === '::1' || ip.endsWith('127.0.0.1');
 }
 
-function requireStaffMfaRole(
+async function requireStaffMfaRole(
   req: express.Request,
   res: express.Response,
   allowedRoles: string[]
-): boolean {
+): Promise<boolean> {
   if (isLoopbackTestFixture(req)) {
     return true;
   }
@@ -80,6 +168,29 @@ function requireStaffMfaRole(
     });
     return false;
   }
+
+  // When Firebase Admin SDK is configured and a Firebase ID token is supplied, enforce live backend UID + Firestore role verification
+  const firebaseIdToken = String(req.headers['x-firebase-id-token'] || '').trim();
+  const fbBackend = getLiveFirebaseAdminBackend();
+  if (fbBackend && firebaseIdToken) {
+    const decoded = await fbBackend.repo.verifyIdToken(firebaseIdToken);
+    if (!decoded || decoded.uid !== uid || !decoded.emailVerified) {
+      res.status(401).json({
+        ok: false,
+        error: 'Firebase Authentication ID token verification failed.',
+      });
+      return false;
+    }
+    const liveStaff = await fbBackend.repo.getStaffAccountByUid(uid);
+    if (!liveStaff || !liveStaff.active || !allowedRoles.includes(liveStaff.role)) {
+      res.status(403).json({
+        ok: false,
+        error: 'Active Firestore staff role authorization failed on the backend.',
+      });
+      return false;
+    }
+  }
+
   return true;
 }
 
@@ -245,8 +356,8 @@ async function startServer() {
     }
   });
 
-  app.post('/api/qr/verify', (req, res) => {
-    if (!requireStaffMfaRole(req, res, ['receptionist', 'nurse', 'doctor', 'admin'])) {
+  app.post('/api/qr/verify', async (req, res) => {
+    if (!(await requireStaffMfaRole(req, res, ['receptionist', 'nurse', 'doctor', 'admin']))) {
       return;
     }
     const { qrToken } = req.body || {};
@@ -354,8 +465,8 @@ async function startServer() {
   });
 
   // 5. Admin-Only Evaluator CSV Parsing & Statistical Predictive Analytics Endpoints
-  app.post('/api/analytics/import-csv', (req, res) => {
-    if (!requireStaffMfaRole(req, res, ['admin'])) {
+  app.post('/api/analytics/import-csv', async (req, res) => {
+    if (!(await requireStaffMfaRole(req, res, ['admin']))) {
       return;
     }
     try {
@@ -383,8 +494,8 @@ async function startServer() {
     }
   });
 
-  app.post('/api/analytics/forecast', (req, res) => {
-    if (!requireStaffMfaRole(req, res, ['admin'])) {
+  app.post('/api/analytics/forecast', async (req, res) => {
+    if (!(await requireStaffMfaRole(req, res, ['admin']))) {
       return;
     }
     try {
@@ -402,6 +513,288 @@ async function startServer() {
     } catch (err) {
       console.error('Forecast calculation error:', err);
       res.status(500).json({ error: 'Failed to compute statistical forecast.' });
+    }
+  });
+
+  // 6. External Supabase Project Auth, One-Time Initial Admin Bootstrap, TOTP 2FA & Staff Management
+  app.get('/api/supabase/public-config', (_req, res) => {
+    const env = getSupabaseRuntimeEnv();
+    res.json({
+      configured: env.configured,
+      supabaseUrl: env.configured ? env.supabaseUrl : '',
+      supabaseAnonKey: env.configured ? env.supabaseAnonKey : '',
+      bootstrapArmed: env.bootstrapArmed,
+    });
+  });
+
+  app.get('/api/supabase/public-catalog', async (_req, res) => {
+    const backend = getLiveSupabaseBackend();
+    if (!backend) {
+      res.status(503).json({ ok: false, error: 'Supabase connection is not configured yet.' });
+      return;
+    }
+    try {
+      const catalog = await backend.repo.getPublicCatalog();
+      res.json({ ok: true, ...catalog });
+    } catch (err: any) {
+      console.error('Supabase public catalog error:', err);
+      res.status(500).json({ ok: false, error: err?.message || 'Failed to load public catalog.' });
+    }
+  });
+
+  app.get('/api/supabase/staff/me', async (req, res) => {
+    const backend = getLiveSupabaseBackend();
+    if (!backend) {
+      res.status(503).json({ ok: false, error: 'Supabase connection is not configured yet.' });
+      return;
+    }
+    try {
+      const token = extractBearerToken(req);
+      const out = await backend.controller.getSessionStatus(token);
+      res.status(out.status).json(out.body);
+    } catch (err: any) {
+      console.error('Supabase session check error:', err);
+      res.status(500).json({ ok: false, error: err?.message || 'Failed to check staff session.' });
+    }
+  });
+
+  app.post('/api/supabase/bootstrap-admin', async (req, res) => {
+    const backend = getLiveSupabaseBackend();
+    if (!backend) {
+      res.status(503).json({ ok: false, error: 'Supabase connection is not configured yet.' });
+      return;
+    }
+    try {
+      const token = extractBearerToken(req);
+      const fullName = String(req.body?.fullName || '');
+      const out = await backend.controller.bootstrapFirstAdmin({
+        accessToken: token,
+        fullName,
+      });
+      res.status(out.status).json(out.body);
+    } catch (err: any) {
+      console.error('Supabase initial Admin bootstrap error:', err);
+      res.status(500).json({
+        ok: false,
+        error: err?.message || 'Server error during one-time initial Admin bootstrap.',
+      });
+    }
+  });
+
+  app.post('/api/supabase/mfa/setup', async (req, res) => {
+    const backend = getLiveSupabaseBackend();
+    if (!backend) {
+      res.status(503).json({ ok: false, error: 'Supabase connection is not configured yet.' });
+      return;
+    }
+    try {
+      const token = extractBearerToken(req);
+      const out = await backend.controller.setupTotpEnrollment({ accessToken: token });
+      res.status(out.status).json(out.body);
+    } catch (err: any) {
+      console.error('Supabase MFA setup error:', err);
+      res.status(500).json({ ok: false, error: err?.message || 'Unable to generate TOTP setup.' });
+    }
+  });
+
+  app.post('/api/supabase/mfa/confirm', async (req, res) => {
+    const backend = getLiveSupabaseBackend();
+    if (!backend) {
+      res.status(503).json({ ok: false, error: 'Supabase connection is not configured yet.' });
+      return;
+    }
+    try {
+      const token = extractBearerToken(req);
+      const { encryptedSecret, recoveryHashes, code } = req.body || {};
+      const out = await backend.controller.confirmTotpEnrollment({
+        accessToken: token,
+        encryptedSecret: String(encryptedSecret || ''),
+        recoveryHashes: Array.isArray(recoveryHashes) ? recoveryHashes : [],
+        code: String(code || ''),
+      });
+      res.status(out.status).json(out.body);
+    } catch (err: any) {
+      console.error('Supabase MFA confirm error:', err);
+      res.status(500).json({ ok: false, error: err?.message || 'Failed to confirm TOTP enrollment.' });
+    }
+  });
+
+  app.post('/api/supabase/mfa/verify', async (req, res) => {
+    const backend = getLiveSupabaseBackend();
+    if (!backend) {
+      res.status(503).json({ ok: false, error: 'Supabase connection is not configured yet.' });
+      return;
+    }
+    try {
+      const token = extractBearerToken(req);
+      const { code, recoveryCode } = req.body || {};
+      const out = await backend.controller.verifyTotpChallenge({
+        accessToken: token,
+        code: code ? String(code) : undefined,
+        recoveryCode: recoveryCode ? String(recoveryCode) : undefined,
+      });
+      res.status(out.status).json(out.body);
+    } catch (err: any) {
+      console.error('Supabase MFA verify error:', err);
+      res.status(500).json({ ok: false, error: err?.message || 'Failed to verify TOTP session.' });
+    }
+  });
+
+  app.get('/api/supabase/admin/staff', async (req, res) => {
+    const backend = getLiveSupabaseBackend();
+    if (!backend) {
+      res.status(503).json({ ok: false, error: 'Supabase connection is not configured yet.' });
+      return;
+    }
+    try {
+      const token = extractBearerToken(req);
+      const mfaToken = String(req.headers['x-mfa-assurance-token'] || '');
+      const out = await backend.controller.listStaffAccounts({
+        accessToken: token,
+        mfaAssuranceToken: mfaToken,
+      });
+      res.status(out.status).json(out.body);
+    } catch (err: any) {
+      console.error('Supabase list staff error:', err);
+      res.status(500).json({ ok: false, error: err?.message || 'Failed to list staff accounts.' });
+    }
+  });
+
+  app.post('/api/supabase/admin/staff', async (req, res) => {
+    const backend = getLiveSupabaseBackend();
+    if (!backend) {
+      res.status(503).json({ ok: false, error: 'Supabase connection is not configured yet.' });
+      return;
+    }
+    try {
+      const token = extractBearerToken(req);
+      const mfaToken = String(req.headers['x-mfa-assurance-token'] || '');
+      const { email, password, fullName, role, department, specialty, titleDisplay } =
+        req.body || {};
+      const out = await backend.controller.createStaffAccount({
+        accessToken: token,
+        mfaAssuranceToken: mfaToken,
+        email: String(email || ''),
+        password: String(password || ''),
+        fullName: String(fullName || ''),
+        role,
+        department: String(department || ''),
+        specialty: String(specialty || ''),
+        titleDisplay: String(titleDisplay || ''),
+      });
+      res.status(out.status).json(out.body);
+    } catch (err: any) {
+      console.error('Supabase create staff error:', err);
+      res.status(500).json({ ok: false, error: err?.message || 'Failed to create staff account.' });
+    }
+  });
+
+  app.patch('/api/supabase/admin/staff/:uid', async (req, res) => {
+    const backend = getLiveSupabaseBackend();
+    if (!backend) {
+      res.status(503).json({ ok: false, error: 'Supabase connection is not configured yet.' });
+      return;
+    }
+    try {
+      const token = extractBearerToken(req);
+      const mfaToken = String(req.headers['x-mfa-assurance-token'] || '');
+      const { role, department, specialty, titleDisplay, active, resetMfa } = req.body || {};
+      const out = await backend.controller.updateStaffAccount({
+        accessToken: token,
+        mfaAssuranceToken: mfaToken,
+        targetUid: String(req.params.uid || ''),
+        role,
+        department: String(department || ''),
+        specialty: String(specialty || ''),
+        titleDisplay: String(titleDisplay || ''),
+        active: Boolean(active),
+        resetMfa: Boolean(resetMfa),
+      });
+      res.status(out.status).json(out.body);
+    } catch (err: any) {
+      console.error('Supabase update staff error:', err);
+      res.status(500).json({ ok: false, error: err?.message || 'Failed to update staff account.' });
+    }
+  });
+
+  // 7. Firebase Admin SDK Trusted Server-Side Initial Administrator Bootstrap & Session Verification
+  app.get('/api/firebase/bootstrap-status', async (_req, res) => {
+    const env = getFirebaseRuntimeEnv();
+    let bootstrapLocked = false;
+    const fbBackend = getLiveFirebaseAdminBackend();
+    if (fbBackend) {
+      try {
+        const lockState = await fbBackend.repo.isBootstrapLockedOrHasAdmin();
+        bootstrapLocked = lockState.locked;
+      } catch (err) {
+        console.warn('Firebase Admin lock check warning:', err);
+      }
+    }
+    // Never expose FIREBASE_INITIAL_ADMIN_UID or service account details in responses
+    res.json({
+      ok: true,
+      adminSdkConfigured: env.adminSdkConfigured,
+      bootstrapArmed: env.bootstrapArmed,
+      bootstrapLocked,
+      projectId: env.projectId,
+      firestoreDatabaseId: env.firestoreDatabaseId,
+    });
+  });
+
+  app.get('/api/firebase/staff/me', async (req, res) => {
+    const token = extractBearerToken(req);
+    if (!token) {
+      res.status(401).json({ ok: false, error: 'Valid Firebase Authentication ID token is required.' });
+      return;
+    }
+    const fbBackend = getLiveFirebaseAdminBackend();
+    if (!fbBackend) {
+      res.status(503).json({
+        ok: false,
+        adminSdkConfigured: false,
+        error:
+          'Firebase Admin SDK credentials are not configured in server runtime. Run `npm run bootstrap:admin` locally/in Cloud Shell with GOOGLE_APPLICATION_CREDENTIALS, or configure FIREBASE_SERVICE_ACCOUNT_JSON + FIREBASE_INITIAL_ADMIN_UID in AI Studio Secrets.',
+      });
+      return;
+    }
+    try {
+      const out = await fbBackend.controller.getStaffSessionStatus(token);
+      res.status(out.status).json(out.body);
+    } catch (err: any) {
+      console.error('Firebase Admin staff session check error:', err);
+      res.status(500).json({ ok: false, error: err?.message || 'Failed to verify Firebase staff session.' });
+    }
+  });
+
+  app.post('/api/firebase/bootstrap-admin', async (req, res) => {
+    const token = extractBearerToken(req);
+    if (!token) {
+      res.status(401).json({ ok: false, error: 'Valid Firebase Authentication ID token is required.' });
+      return;
+    }
+    const fbBackend = getLiveFirebaseAdminBackend();
+    if (!fbBackend) {
+      res.status(503).json({
+        ok: false,
+        adminSdkConfigured: false,
+        error:
+          'Firebase Admin SDK credentials are not configured on the server. Initial System Administrator assignment requires Firebase Admin SDK via `npm run bootstrap:admin` or server secrets.',
+      });
+      return;
+    }
+    try {
+      const fullName = String(req.body?.fullName || '');
+      const out = await fbBackend.controller.bootstrapFirstAdminFromHttp({
+        idToken: token,
+        fullName,
+      });
+      res.status(out.status).json(out.body);
+    } catch (err: any) {
+      console.error('Firebase Admin bootstrap error:', err);
+      res.status(500).json({
+        ok: false,
+        error: err?.message || 'Server error during Firebase Admin SDK one-time bootstrap.',
+      });
     }
   });
 

@@ -12,6 +12,31 @@
       },
       "required": ["uid", "email", "createdAt", "updatedAt"]
     },
+    "BootstrapLock": {
+      "title": "BootstrapLock",
+      "description": "Server-only Firebase Admin SDK singleton lock recording one-time initial System Administrator activation.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "bootstrappedAdminUid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "bootstrappedAdminEmail": { "type": "string", "maxLength": 160 },
+        "locked": { "type": "boolean" },
+        "source": { "type": "string", "maxLength": 40 },
+        "createdIso": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "bootstrappedAdminUid",
+        "bootstrappedAdminEmail",
+        "locked",
+        "source",
+        "createdIso",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
     "ClinicRoster": {
       "title": "ClinicRoster",
       "description": "Bounded clinic staff UID roster used for zero-get secure list filtering and bootstrap state.",
@@ -487,6 +512,10 @@
     }
   },
   "firestore": {
+    "/bootstrap_locks/{lockId}": {
+      "schema": "BootstrapLock",
+      "description": "Immutable server-only singleton lock preventing repeat initial Admin bootstrap."
+    },
     "/admins/{adminUid}": {
       "schema": "AdminMarker",
       "description": "Administrator RBAC identity registry."

@@ -39,6 +39,10 @@ import {
   OperationType,
 } from '../lib/firebase';
 import {
+  fetchPublicSupabaseConfig,
+  getBrowserSupabaseClient,
+} from '../lib/supabase';
+import {
   DEFAULT_CLINIC_SERVICES,
   DEFAULT_COVERAGE_SETTINGS,
   DEFAULT_MEDICINE_INVENTORY,
@@ -118,8 +122,6 @@ export interface OperationalAnalyticsEvent {
   standardizedComplaint: ConsultationRecord['standardizedComplaint'];
 }
 
-export const DESIGNATED_BOOTSTRAP_ADMIN_EMAIL = 'cervitopatrick0@gmail.com';
-
 export function emailToInviteId(email: string): string {
   return email
     .trim()
@@ -142,9 +144,22 @@ export function isLocalhostTestFixture(): boolean {
   return new URLSearchParams(window.location.search).get('testFixture') === '1';
 }
 
+export interface FirebaseBootstrapClientStatus {
+  adminSdkConfigured: boolean;
+  bootstrapArmed: boolean;
+  bootstrapLocked: boolean;
+  canBootstrapCurrentUser: boolean;
+}
+
 export interface ClinicContextValue {
   authReady: boolean;
   isTestFixture: boolean;
+  authProviderMode: 'supabase' | 'firebase';
+  supabaseAccessToken: string;
+  supabaseBootstrapLocked: boolean;
+  supabaseBootstrapArmed: boolean;
+  supabaseCanBootstrapCurrentUser: boolean;
+  firebaseBootstrapStatus: FirebaseBootstrapClientStatus;
   firebaseUser: { uid: string; email: string; emailVerified: boolean; displayName: string } | null;
   patientAccount: PatientPortalAccount | null;
   staffAccount: StaffAccount | null;
@@ -211,6 +226,7 @@ export interface ClinicContextValue {
     recoveryHashes: string[];
     assuranceToken: string;
     expiresAtMs: number;
+    alreadyPersistedOnServer?: boolean;
   }) => Promise<{ ok: boolean; error?: string }>;
   setStaffMfaVerifiedSession: (params: {
     assuranceToken: string;
@@ -399,6 +415,15 @@ export interface ClinicContextValue {
   dismissNotificationPopupAction: (notifId: string) => Promise<void>;
 
   // Admin Actions
+  createStaffAccountAction: (params: {
+    email: string;
+    password: string;
+    fullName: string;
+    role: StaffRole;
+    department: string;
+    specialty: string;
+    titleDisplay: string;
+  }) => Promise<{ ok: boolean; error?: string; staffAccount?: StaffAccount }>;
   inviteStaffMemberAction: (params: {
     email: string;
     fullName: string;
@@ -462,6 +487,19 @@ export function ClinicProvider({
   const isTestFixture = useMemo(() => isLocalhostTestFixture(), []);
 
   const [authReady, setAuthReady] = useState(isTestFixture);
+  const [supabaseConfigChecked, setSupabaseConfigChecked] = useState(isTestFixture);
+  const [authProviderMode, setAuthProviderMode] = useState<'supabase' | 'firebase'>('firebase');
+  const [supabaseAccessToken, setSupabaseAccessToken] = useState('');
+  const [supabaseBootstrapLocked, setSupabaseBootstrapLocked] = useState(false);
+  const [supabaseBootstrapArmed, setSupabaseBootstrapArmed] = useState(false);
+  const [supabaseCanBootstrapCurrentUser, setSupabaseCanBootstrapCurrentUser] = useState(false);
+  const [firebaseBootstrapStatus, setFirebaseBootstrapStatus] =
+    useState<FirebaseBootstrapClientStatus>({
+      adminSdkConfigured: false,
+      bootstrapArmed: false,
+      bootstrapLocked: isTestFixture,
+      canBootstrapCurrentUser: false,
+    });
   const [firebaseUser, setFirebaseUser] = useState<ClinicContextValue['firebaseUser']>(null);
   const [patientAccount, setPatientAccount] = useState<PatientPortalAccount | null>(null);
   const [staffAccount, setStaffAccount] = useState<StaffAccount | null>(null);
@@ -777,8 +815,174 @@ export function ClinicProvider({
   // ---------------------------------------------------------------------------
   // Real Firebase Auth + Public Firestore Catalog Subscriptions
   // ---------------------------------------------------------------------------
+  // Detect External Supabase Project Configuration & Sync Session + Catalog
   useEffect(() => {
     if (isTestFixture) return;
+    let active = true;
+    let unsubSupabaseAuth: (() => void) | null = null;
+
+    const refreshSupabaseStaffSession = async (accessToken: string, displayNameHint: string) => {
+      try {
+        const resp = await fetch('/api/supabase/staff/me', {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        });
+        const data = await resp.json();
+        if (!active) return;
+        if (!resp.ok || !data.ok) {
+          setStaffAccount(null);
+          return;
+        }
+        setFirebaseUser({
+          uid: data.uid,
+          email: data.email || '',
+          emailVerified: Boolean(data.emailVerified),
+          displayName: data.staffAccount?.fullName || displayNameHint || '',
+        });
+        setStaffAccount(data.staffAccount || null);
+        setSupabaseBootstrapLocked(Boolean(data.bootstrapLocked));
+        setSupabaseBootstrapArmed(Boolean(data.bootstrapArmed));
+        setSupabaseCanBootstrapCurrentUser(Boolean(data.canBootstrapCurrentUser));
+        if (data.bootstrapLocked) {
+          setRoster((prev) => ({
+            ...prev,
+            bootstrappedAdminUid: prev.bootstrappedAdminUid || 'supabase-locked',
+          }));
+        }
+      } catch (err) {
+        console.warn('Supabase staff session lookup error:', err);
+      } finally {
+        if (active) setAuthReady(true);
+      }
+    };
+
+    (async () => {
+      const cfg = await fetchPublicSupabaseConfig();
+      if (!active) return;
+      if (!cfg.configured) {
+        setAuthProviderMode('firebase');
+        fetch('/api/firebase/bootstrap-status')
+          .then((r) => r.json())
+          .then((st) => {
+            if (!active || !st?.ok) return;
+            setFirebaseBootstrapStatus((prev) => ({
+              ...prev,
+              adminSdkConfigured: Boolean(st.adminSdkConfigured),
+              bootstrapArmed: Boolean(st.bootstrapArmed),
+              bootstrapLocked: prev.bootstrapLocked || Boolean(st.bootstrapLocked),
+            }));
+          })
+          .catch(() => {});
+        setSupabaseConfigChecked(true);
+        return;
+      }
+
+      setAuthProviderMode('supabase');
+      setSupabaseBootstrapArmed(cfg.bootstrapArmed);
+      setSupabaseConfigChecked(true);
+
+      // Load public clinic services, doctors & guides from Supabase PostgreSQL
+      fetch('/api/supabase/public-catalog')
+        .then((r) => r.json())
+        .then((cat) => {
+          if (!active || !cat?.ok) return;
+          if (Array.isArray(cat.services) && cat.services.length > 0) setServices(cat.services);
+          if (Array.isArray(cat.doctorSchedules)) setDoctorSchedules(cat.doctorSchedules);
+          if (Array.isArray(cat.patientGuides) && cat.patientGuides.length > 0) {
+            setPatientGuides(cat.patientGuides);
+          }
+        })
+        .catch(() => {});
+
+      const sb = await getBrowserSupabaseClient();
+      if (!active || !sb) {
+        setAuthReady(true);
+        return;
+      }
+
+      const {
+        data: { session: initialSession },
+      } = await sb.auth.getSession();
+      if (!active) return;
+      if (initialSession?.access_token && initialSession.user) {
+        setSupabaseAccessToken(initialSession.access_token);
+        await refreshSupabaseStaffSession(
+          initialSession.access_token,
+          String(initialSession.user.email || '')
+        );
+      } else {
+        setAuthReady(true);
+      }
+
+      const { data: sub } = sb.auth.onAuthStateChange(async (_event, session) => {
+        if (!active) return;
+        if (!session?.access_token || !session.user) {
+          setSupabaseAccessToken('');
+          setFirebaseUser(null);
+          setStaffAccount(null);
+          setMfaSessionVerified(false);
+          setMfaAssuranceToken('');
+          setSupabaseCanBootstrapCurrentUser(false);
+          setAuthReady(true);
+          return;
+        }
+        setSupabaseAccessToken(session.access_token);
+        await refreshSupabaseStaffSession(session.access_token, String(session.user.email || ''));
+      });
+      unsubSupabaseAuth = () => sub.subscription.unsubscribe();
+    })();
+
+    return () => {
+      active = false;
+      if (unsubSupabaseAuth) unsubSupabaseAuth();
+    };
+  }, [isTestFixture]);
+
+  // Load Supabase Staff Roster when Admin completes TOTP 2FA verification
+  useEffect(() => {
+    if (
+      isTestFixture ||
+      authProviderMode !== 'supabase' ||
+      staffAccount?.role !== 'admin' ||
+      !mfaSessionVerified ||
+      !supabaseAccessToken ||
+      !mfaAssuranceToken
+    ) {
+      return;
+    }
+    let active = true;
+    (async () => {
+      try {
+        const resp = await fetch('/api/supabase/admin/staff', {
+          headers: {
+            Authorization: `Bearer ${supabaseAccessToken}`,
+            'X-MFA-Assurance-Token': mfaAssuranceToken,
+          },
+        });
+        const data = await resp.json();
+        if (!active || !resp.ok || !data.ok) return;
+        const list: StaffAccount[] = data.staffAccounts || [];
+        setStaffAccounts(list);
+        setRoster({
+          bootstrappedAdminUid: data.bootstrappedAdminUid || staffAccount.uid,
+          adminUids: list.filter((s) => s.role === 'admin' && s.active).map((s) => s.uid),
+          doctorUids: list.filter((s) => s.role === 'doctor' && s.active).map((s) => s.uid),
+          nurseUids: list.filter((s) => s.role === 'nurse' && s.active).map((s) => s.uid),
+          receptionistUids: list.filter((s) => s.role === 'receptionist' && s.active).map((s) => s.uid),
+          labUids: list.filter((s) => s.role === 'laboratory' && s.active).map((s) => s.uid),
+          pharmacistUids: list.filter((s) => s.role === 'pharmacist' && s.active).map((s) => s.uid),
+          allStaffUids: list.filter((s) => s.active).map((s) => s.uid),
+        });
+      } catch (err) {
+        console.warn('Supabase staff roster load warning:', err);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [isTestFixture, authProviderMode, staffAccount, mfaSessionVerified, supabaseAccessToken, mfaAssuranceToken]);
+
+  useEffect(() => {
+    if (isTestFixture || !supabaseConfigChecked || authProviderMode === 'supabase') return;
 
     const unsubServices = onSnapshot(
       query(collection(db, 'clinic_services'), where('active', '==', true)),
@@ -834,7 +1038,7 @@ export function ClinicProvider({
       unsubDoctors();
       unsubGuides();
     };
-  }, [isTestFixture]);
+  }, [isTestFixture, supabaseConfigChecked, authProviderMode]);
 
   // Session MFA timeout watcher (30 minutes)
   useEffect(() => {
@@ -852,17 +1056,23 @@ export function ClinicProvider({
     return () => window.clearTimeout(timer);
   }, [mfaSessionVerified, mfaExpiresAtMs]);
 
-  // Real Firebase Auth Listener
+  // Real Firebase Auth Listener (Fallback when external Supabase is not yet configured)
   useEffect(() => {
-    if (isTestFixture) return;
+    if (isTestFixture || !supabaseConfigChecked || authProviderMode === 'supabase') return;
+
+    const fallbackReadyTimer = window.setTimeout(() => {
+      setAuthReady(true);
+    }, 3000);
 
     const unsubscribe = onAuthStateChanged(auth, async (user: User | null) => {
+      window.clearTimeout(fallbackReadyTimer);
       if (!user) {
         setFirebaseUser(null);
         setPatientAccount(null);
         setStaffAccount(null);
         setMfaSessionVerified(false);
         setMfaAssuranceToken('');
+        setFirebaseBootstrapStatus((prev) => ({ ...prev, canBootstrapCurrentUser: false }));
         setAuthReady(true);
         return;
       }
@@ -875,13 +1085,16 @@ export function ClinicProvider({
       });
 
       try {
-        // Load clinic roster if available
-        const rosterSnap = await getDoc(doc(db, 'clinic_roster', 'current'));
-        if (rosterSnap.exists()) {
-          setRoster(rosterSnap.data() as ClinicRosterDoc);
-        } else {
-          setRoster(EMPTY_ROSTER);
-        }
+        // Check one-time server bootstrap lock + clinic roster
+        const [lockSnap, rosterSnap] = await Promise.all([
+          getDoc(doc(db, 'bootstrap_locks', 'initial_admin')),
+          getDoc(doc(db, 'clinic_roster', 'current')),
+        ]);
+        const rosterData = rosterSnap.exists() ? (rosterSnap.data() as ClinicRosterDoc) : EMPTY_ROSTER;
+        setRoster(rosterData);
+        const lockExists = Boolean(
+          (lockSnap.exists() && lockSnap.data()?.locked === true) || rosterData.bootstrappedAdminUid
+        );
 
         // Load Coverage Settings if available
         const covSnap = await getDoc(doc(db, 'coverage_settings', 'current'));
@@ -898,8 +1111,54 @@ export function ClinicProvider({
             createdAt: staffData.createdIso || '',
             updatedAt: staffData.createdIso || '',
           });
+          setFirebaseBootstrapStatus((prev) => ({
+            ...prev,
+            bootstrapLocked: lockExists || staffData.role === 'admin',
+            canBootstrapCurrentUser: false,
+          }));
         } else {
           setStaffAccount(null);
+          // Query trusted backend Firebase Admin SDK status if not yet locked; NEVER auto-promote first visitor!
+          if (!lockExists && user.emailVerified) {
+            try {
+              const idToken = await user.getIdToken();
+              const meResp = await fetch('/api/firebase/staff/me', {
+                headers: { Authorization: `Bearer ${idToken}` },
+              });
+              if (meResp.ok) {
+                const meData = await meResp.json();
+                if (meData?.ok) {
+                  setFirebaseBootstrapStatus({
+                    adminSdkConfigured: true,
+                    bootstrapArmed: Boolean(meData.bootstrapArmed),
+                    bootstrapLocked: Boolean(meData.bootstrapLocked),
+                    canBootstrapCurrentUser: Boolean(meData.canBootstrapCurrentUser),
+                  });
+                  if (meData.staffAccount) {
+                    setStaffAccount(meData.staffAccount);
+                  }
+                }
+              } else {
+                setFirebaseBootstrapStatus((prev) => ({
+                  ...prev,
+                  bootstrapLocked: lockExists,
+                  canBootstrapCurrentUser: false,
+                }));
+              }
+            } catch {
+              setFirebaseBootstrapStatus((prev) => ({
+                ...prev,
+                bootstrapLocked: lockExists,
+                canBootstrapCurrentUser: false,
+              }));
+            }
+          } else {
+            setFirebaseBootstrapStatus((prev) => ({
+              ...prev,
+              bootstrapLocked: lockExists,
+              canBootstrapCurrentUser: false,
+            }));
+          }
         }
 
         // Independently check if user also has a Patient Portal account so /patient/dashboard stays intact
@@ -961,12 +1220,15 @@ export function ClinicProvider({
       }
     });
 
-    return () => unsubscribe();
-  }, [isTestFixture]);
+    return () => {
+      window.clearTimeout(fallbackReadyTimer);
+      unsubscribe();
+    };
+  }, [isTestFixture, supabaseConfigChecked, authProviderMode]);
 
   // Role-Scoped Real-time Firestore Listeners
   useEffect(() => {
-    if (isTestFixture || !authReady || !firebaseUser) return;
+    if (isTestFixture || !supabaseConfigChecked || authProviderMode === 'supabase' || !authReady || !firebaseUser) return;
 
     const uid = firebaseUser.uid;
     const unsubs: (() => void)[] = [];
@@ -1303,7 +1565,17 @@ export function ClinicProvider({
     return () => {
       unsubs.forEach((u) => u());
     };
-  }, [isTestFixture, authReady, firebaseUser, patientAccount, staffAccount, mfaSessionVerified, currentPath]);
+  }, [
+    isTestFixture,
+    supabaseConfigChecked,
+    authProviderMode,
+    authReady,
+    firebaseUser,
+    patientAccount,
+    staffAccount,
+    mfaSessionVerified,
+    currentPath,
+  ]);
 
   // Helper: Emit Notification + Audit Log safely
   const emitNotification = useCallback(
@@ -1386,7 +1658,7 @@ export function ClinicProvider({
       const id = uidShort('AUD');
       const actorRole: UserRole = staffAccount?.role || 'patient';
 
-      if (isTestFixture) {
+      if (isTestFixture || authProviderMode === 'supabase') {
         setAuditLogs((prev) => [
           {
             id,
@@ -1425,7 +1697,7 @@ export function ClinicProvider({
         console.warn('Audit log write warning:', err);
       }
     },
-    [firebaseUser, staffAccount, isTestFixture, roster.adminUids]
+    [firebaseUser, staffAccount, isTestFixture, authProviderMode, roster.adminUids]
   );
 
   // Materialize due 24-hour Asia/Manila in-app appointment reminders on Patient Portal access
@@ -1503,6 +1775,21 @@ export function ClinicProvider({
   };
 
   const signInWithEmailAction = async (email: string, password: string) => {
+    if (authProviderMode === 'supabase') {
+      const sb = await getBrowserSupabaseClient();
+      if (!sb) {
+        return { ok: false, error: 'Supabase Auth client is not configured.' };
+      }
+      const { error } = await sb.auth.signInWithPassword({
+        email: email.trim(),
+        password,
+      });
+      if (error) {
+        return { ok: false, error: error.message || 'Invalid Supabase email or password.' };
+      }
+      return { ok: true };
+    }
+
     try {
       await signInWithEmailAndPassword(auth, email.trim(), password);
       return { ok: true };
@@ -1676,116 +1963,94 @@ export function ClinicProvider({
   };
 
   const bootstrapInitialAdminAction = async (fullName: string) => {
-    if (!firebaseUser || !firebaseUser.emailVerified) {
-      return { ok: false, error: 'Verified account required to initialize Administrator.' };
+    if (authProviderMode === 'supabase') {
+      if (!supabaseAccessToken) {
+        return { ok: false, error: 'Valid Supabase Auth session required.' };
+      }
+      try {
+        const resp = await fetch('/api/supabase/bootstrap-admin', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${supabaseAccessToken}`,
+          },
+          body: JSON.stringify({ fullName }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.ok) {
+          if (data.bootstrapLocked) {
+            setSupabaseBootstrapLocked(true);
+            setSupabaseCanBootstrapCurrentUser(false);
+          }
+          return {
+            ok: false,
+            error: data.error || 'One-time initial Administrator bootstrap failed.',
+          };
+        }
+        setSupabaseBootstrapLocked(true);
+        setSupabaseCanBootstrapCurrentUser(false);
+        setStaffAccount(data.staffAccount);
+        setRoster((prev) => ({
+          ...prev,
+          bootstrappedAdminUid: data.staffAccount.uid,
+          adminUids: [data.staffAccount.uid],
+          allStaffUids: [data.staffAccount.uid],
+        }));
+        return { ok: true };
+      } catch (err: any) {
+        return { ok: false, error: err?.message || 'Server bootstrap request failed.' };
+      }
     }
-    if (firebaseUser.email.trim().toLowerCase() !== DESIGNATED_BOOTSTRAP_ADMIN_EMAIL) {
-      return {
-        ok: false,
-        error: `Initial Administrator bootstrap is restricted to the designated project owner (${DESIGNATED_BOOTSTRAP_ADMIN_EMAIL}). Unrestricted public administrator registration is disabled.`,
-      };
+
+    if (!firebaseUser || !firebaseUser.emailVerified || !auth.currentUser) {
+      return { ok: false, error: 'Verified Firebase Authentication session required.' };
     }
-    const nowIso = new Date().toISOString();
 
     try {
-      const batch = writeBatch(db);
-      batch.set(doc(db, 'admins', firebaseUser.uid), {
-        uid: firebaseUser.uid,
-        email: firebaseUser.email.trim().toLowerCase(),
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
+      const idToken = await auth.currentUser.getIdToken();
+      const resp = await fetch('/api/firebase/bootstrap-admin', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${idToken}`,
+        },
+        body: JSON.stringify({ fullName }),
       });
-
-      const nextRoster: ClinicRosterDoc = {
-        bootstrappedAdminUid: firebaseUser.uid,
-        adminUids: [firebaseUser.uid],
-        doctorUids: [],
-        nurseUids: [],
-        receptionistUids: [],
-        labUids: [],
-        pharmacistUids: [],
-        allStaffUids: [firebaseUser.uid],
-      };
-
-      batch.set(doc(db, 'clinic_roster', 'current'), {
-        ...nextRoster,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-
-      batch.set(doc(db, 'staff_accounts', firebaseUser.uid), {
-        uid: firebaseUser.uid,
-        email: firebaseUser.email.trim().toLowerCase(),
-        fullName: fullName.trim() || firebaseUser.displayName || 'Clinic Administrator',
-        role: 'admin',
-        department: 'Clinic Administration',
-        specialty: '',
-        titleDisplay: 'System Administrator',
-        active: true,
-        mfaEnrolled: false,
-        mfaEncryptedSecret: '',
-        mfaRecoveryHashes: [],
-        authorizedViewerUids: [firebaseUser.uid],
-        createdIso: nowIso,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-
-      // Seed default services, patient guides, coverage settings, and clinic medicine formulary
-      for (const srv of DEFAULT_CLINIC_SERVICES) {
-        batch.set(doc(db, 'clinic_services', srv.id), {
-          ...srv,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) {
+        if (data.bootstrapLocked) {
+          setFirebaseBootstrapStatus((prev) => ({
+            ...prev,
+            bootstrapLocked: true,
+            canBootstrapCurrentUser: false,
+          }));
+        }
+        return {
+          ok: false,
+          error:
+            data.error ||
+            'Initial System Administrator bootstrap requires trusted server-side Firebase Admin SDK execution.',
+        };
       }
-      for (const guide of DEFAULT_PATIENT_GUIDES) {
-        batch.set(doc(db, 'patient_guides', guide.id), {
-          ...guide,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-      }
-      for (const med of DEFAULT_MEDICINE_INVENTORY) {
-        batch.set(doc(db, 'medicine_inventory', med.id), {
-          ...med,
-          authorizedViewerUids: [firebaseUser.uid],
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-      }
-      batch.set(doc(db, 'coverage_settings', 'current'), {
-        id: 'current',
-        hmoProvidersAcceptedForManualVerification: DEFAULT_COVERAGE_SETTINGS.hmoProvidersAcceptedForManualVerification,
-        philHealthAdvisoryNote: DEFAULT_COVERAGE_SETTINGS.philHealthAdvisoryNote,
-        requireLoaReferenceForHmo: DEFAULT_COVERAGE_SETTINGS.requireLoaReferenceForHmo,
-        defaultGeneralConsultationFeePhp: DEFAULT_COVERAGE_SETTINGS.defaultGeneralConsultationFeePhp,
-        defaultFollowUpConsultationFeePhp: DEFAULT_COVERAGE_SETTINGS.defaultFollowUpConsultationFeePhp,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
 
-      await batch.commit();
+      // Force token refresh so custom claims ({ role: 'admin', admin: true }) are immediately active
+      await auth.currentUser.getIdToken(true);
 
-      setRoster(nextRoster);
-      setStaffAccount({
-        uid: firebaseUser.uid,
-        email: firebaseUser.email.trim().toLowerCase(),
-        fullName: fullName.trim() || firebaseUser.displayName || 'Clinic Administrator',
-        role: 'admin',
-        department: 'Clinic Administration',
-        specialty: '',
-        titleDisplay: 'System Administrator',
-        active: true,
-        mfaEnrolled: false,
-        mfaEncryptedSecret: '',
-        mfaRecoveryHashes: [],
-        createdAt: nowIso,
-        updatedAt: nowIso,
-      });
+      setFirebaseBootstrapStatus((prev) => ({
+        ...prev,
+        bootstrapLocked: true,
+        canBootstrapCurrentUser: false,
+      }));
+      setStaffAccount(data.staffAccount);
+      setRoster((prev) => ({
+        ...prev,
+        bootstrappedAdminUid: data.staffAccount.uid,
+        adminUids: Array.from(new Set([...prev.adminUids, data.staffAccount.uid])),
+        allStaffUids: Array.from(new Set([...prev.allStaffUids, data.staffAccount.uid])),
+      }));
       return { ok: true };
     } catch (err: any) {
-      return { ok: false, error: err?.message || 'Failed to bootstrap initial Administrator.' };
+      return { ok: false, error: err?.message || 'Server-side Firebase Admin bootstrap failed.' };
     }
   };
 
@@ -1918,7 +2183,7 @@ export function ClinicProvider({
   const completeStaffMfaEnrollment: ClinicContextValue['completeStaffMfaEnrollment'] = async (params) => {
     if (!firebaseUser || !staffAccount) return { ok: false, error: 'No active staff account.' };
 
-    if (!isTestFixture) {
+    if (!isTestFixture && authProviderMode !== 'supabase' && !params.alreadyPersistedOnServer) {
       try {
         await updateDoc(doc(db, 'staff_accounts', firebaseUser.uid), {
           mfaEnrolled: true,
@@ -1937,8 +2202,8 @@ export function ClinicProvider({
         ? {
             ...prev,
             mfaEnrolled: true,
-            mfaEncryptedSecret: params.encryptedSecret,
-            mfaRecoveryHashes: params.recoveryHashes,
+            mfaEncryptedSecret: authProviderMode === 'supabase' ? '' : params.encryptedSecret,
+            mfaRecoveryHashes: authProviderMode === 'supabase' ? [] : params.recoveryHashes,
           }
         : null
     );
@@ -1958,7 +2223,13 @@ export function ClinicProvider({
   };
 
   const setStaffMfaVerifiedSession: ClinicContextValue['setStaffMfaVerifiedSession'] = async (params) => {
-    if (params.usedRecoveryHash && staffAccount && firebaseUser && !isTestFixture) {
+    if (
+      params.usedRecoveryHash &&
+      staffAccount &&
+      firebaseUser &&
+      !isTestFixture &&
+      authProviderMode !== 'supabase'
+    ) {
       const remaining = staffAccount.mfaRecoveryHashes.filter((h) => h !== params.usedRecoveryHash);
       await updateDoc(doc(db, 'staff_accounts', firebaseUser.uid), {
         mfaEnrolled: staffAccount.mfaEnrolled,
@@ -1989,6 +2260,14 @@ export function ClinicProvider({
     if (isTestFixture) {
       setFirebaseUser(null);
       setPatientAccount(null);
+      setStaffAccount(null);
+      return;
+    }
+    if (authProviderMode === 'supabase') {
+      const sb = await getBrowserSupabaseClient();
+      if (sb) await sb.auth.signOut();
+      setSupabaseAccessToken('');
+      setFirebaseUser(null);
       setStaffAccount(null);
       return;
     }
@@ -4006,6 +4285,116 @@ export function ClinicProvider({
   // ---------------------------------------------------------------------------
   // Admin Operational & Predictive Analytics Actions
   // ---------------------------------------------------------------------------
+  const createStaffAccountAction: ClinicContextValue['createStaffAccountAction'] = async (params) => {
+    if (!firebaseUser || staffAccount?.role !== 'admin') {
+      return { ok: false, error: 'Only an authenticated Administrator can create staff accounts.' };
+    }
+    const cleanEmail = params.email.trim().toLowerCase();
+    const cleanName = params.fullName.trim();
+    if (!cleanEmail || !cleanEmail.includes('@') || !cleanName) {
+      return { ok: false, error: 'Staff full name and valid work email address are required.' };
+    }
+    if (params.password.length < 10) {
+      return { ok: false, error: 'Temporary initial password must be at least 10 characters.' };
+    }
+
+    if (isTestFixture) {
+      if (staffAccounts.some((s) => s.email.toLowerCase() === cleanEmail)) {
+        return { ok: false, error: 'A staff account with this email already exists.' };
+      }
+      const nowIso = new Date().toISOString();
+      const newUid = uidShort('stf');
+      const created: StaffAccount = {
+        uid: newUid,
+        email: cleanEmail,
+        fullName: cleanName,
+        role: params.role,
+        department: params.department.trim(),
+        specialty: params.role === 'doctor' ? params.specialty.trim() : '',
+        titleDisplay: params.titleDisplay.trim(),
+        active: true,
+        mfaEnrolled: false,
+        mfaEncryptedSecret: '',
+        mfaRecoveryHashes: [],
+        createdAt: nowIso,
+        updatedAt: nowIso,
+      };
+      setStaffAccounts((prev) => [...prev, created]);
+      if (params.role === 'doctor') {
+        setDoctorSchedules((prev) => [
+          ...prev,
+          {
+            id: newUid,
+            doctorUid: newUid,
+            doctorName: cleanName,
+            specialty: params.specialty.trim() || 'Internal Medicine',
+            workdays: [1, 2, 3, 4, 5],
+            startTime: '08:00',
+            endTime: '17:00',
+            breakStart: '12:00',
+            breakEnd: '13:00',
+            consultationDurationMinutes: 30,
+            slotCapacity: 1,
+            qualifiedServiceIds: ['srv-general-consult', 'srv-followup-consult'],
+            active: true,
+            updatedAt: nowIso,
+          },
+        ]);
+      }
+      await recordAudit({
+        action: 'STAFF_ACCOUNT_CREATED',
+        category: 'Administrative',
+        targetType: 'staff_account',
+        targetId: newUid,
+        summary: `Created ${params.role.toUpperCase()} account for ${cleanEmail} (mandatory TOTP 2FA required on first login).`,
+      });
+      return { ok: true, staffAccount: created };
+    }
+
+    if (authProviderMode === 'supabase') {
+      try {
+        const resp = await fetch('/api/supabase/admin/staff', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${supabaseAccessToken}`,
+            'X-MFA-Assurance-Token': mfaAssuranceToken,
+          },
+          body: JSON.stringify(params),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.ok) {
+          return { ok: false, error: data.error || 'Could not create Supabase staff account.' };
+        }
+        const created: StaffAccount = data.staffAccount;
+        setStaffAccounts((prev) => [...prev.filter((s) => s.uid !== created.uid), created]);
+        if (params.role === 'doctor') {
+          fetch('/api/supabase/public-catalog')
+            .then((r) => r.json())
+            .then((cat) => {
+              if (cat?.ok && Array.isArray(cat.doctorSchedules)) {
+                setDoctorSchedules(cat.doctorSchedules);
+              }
+            })
+            .catch(() => {});
+        }
+        return { ok: true, staffAccount: created };
+      } catch (err: any) {
+        return { ok: false, error: err?.message || 'Failed to create staff account.' };
+      }
+    }
+
+    const invRes = await inviteStaffMemberAction({
+      email: params.email,
+      fullName: params.fullName,
+      role: params.role,
+      department: params.department,
+      specialty: params.specialty,
+      titleDisplay: params.titleDisplay,
+    });
+    return invRes;
+  };
+
   const inviteStaffMemberAction: ClinicContextValue['inviteStaffMemberAction'] = async (params) => {
     if (!firebaseUser) return { ok: false, error: 'Unauthorized.' };
     const cleanEmail = params.email.trim().toLowerCase();
@@ -4160,7 +4549,8 @@ export function ClinicProvider({
     const target = staffAccounts.find((s) => s.uid === params.staffUid);
     if (!target) return { ok: false, error: 'Staff member not found.' };
     if (
-      target.email.toLowerCase() === DESIGNATED_BOOTSTRAP_ADMIN_EMAIL &&
+      roster.bootstrappedAdminUid &&
+      target.uid === roster.bootstrappedAdminUid &&
       (!params.active || params.role !== 'admin')
     ) {
       return {
@@ -4183,6 +4573,36 @@ export function ClinicProvider({
         prev.map((s) => (s.uid === params.staffUid ? updatedStaff : s))
       );
       return { ok: true };
+    }
+
+    if (authProviderMode === 'supabase') {
+      try {
+        const resp = await fetch(`/api/supabase/admin/staff/${encodeURIComponent(params.staffUid)}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${supabaseAccessToken}`,
+            'X-MFA-Assurance-Token': mfaAssuranceToken,
+          },
+          body: JSON.stringify({
+            role: params.role,
+            department: params.department,
+            specialty: params.specialty,
+            titleDisplay: params.titleDisplay,
+            active: params.active,
+          }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.ok) {
+          return { ok: false, error: data.error || 'Could not update Supabase staff account.' };
+        }
+        setStaffAccounts((prev) =>
+          prev.map((s) => (s.uid === params.staffUid ? data.staffAccount : s))
+        );
+        return { ok: true };
+      } catch (err: any) {
+        return { ok: false, error: err?.message || 'Failed to update staff account.' };
+      }
     }
 
     const { createdAt: _c, updatedAt: _u, ...rest } = updatedStaff;
@@ -4493,12 +4913,18 @@ export function ClinicProvider({
       return { ok: false, error: 'Only authorized Administrators can import evaluator CSV datasets.' };
     }
 
+    const firebaseIdToken =
+      !isTestFixture && authProviderMode === 'firebase' && auth.currentUser
+        ? await auth.currentUser.getIdToken()
+        : '';
+
     const resp = await fetch('/api/analytics/import-csv', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: mfaAssuranceToken ? `Bearer ${mfaAssuranceToken}` : '',
         'X-Staff-Uid': firebaseUser.uid,
+        ...(firebaseIdToken ? { 'X-Firebase-Id-Token': firebaseIdToken } : {}),
         ...(isTestFixture ? { 'X-Test-Fixture': '1' } : {}),
       },
       body: JSON.stringify({
@@ -4594,6 +5020,12 @@ export function ClinicProvider({
   const value: ClinicContextValue = {
     authReady,
     isTestFixture,
+    authProviderMode,
+    supabaseAccessToken,
+    supabaseBootstrapLocked,
+    supabaseBootstrapArmed,
+    supabaseCanBootstrapCurrentUser,
+    firebaseBootstrapStatus,
     firebaseUser,
     patientAccount,
     staffAccount,
@@ -4662,6 +5094,7 @@ export function ClinicProvider({
     syncOrUpdateBillingAction,
     markNotificationReadAction,
     dismissNotificationPopupAction,
+    createStaffAccountAction,
     inviteStaffMemberAction,
     toggleStaffActiveStatusAction,
     updateStaffAccountRoleAction,

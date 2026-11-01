@@ -44,8 +44,37 @@ const WORKDAYS = [
   { idx: 0, label: 'Sun' },
 ];
 
+function generateTemporaryStaffPassword(): string {
+  const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+  const lower = 'abcdefghijkmnopqrstuvwxyz';
+  const digits = '23456789';
+  const symbols = '!@#$%^&*';
+  const all = upper + lower + digits + symbols;
+  const randomBytes = new Uint32Array(16);
+  window.crypto.getRandomValues(randomBytes);
+  const chars = [
+    upper[randomBytes[0] % upper.length],
+    lower[randomBytes[1] % lower.length],
+    digits[randomBytes[2] % digits.length],
+    symbols[randomBytes[3] % symbols.length],
+  ];
+  for (let i = 4; i < 14; i++) {
+    chars.push(all[randomBytes[i] % all.length]);
+  }
+  // Fisher-Yates shuffle using remaining random values
+  for (let i = chars.length - 1; i > 0; i--) {
+    const j = randomBytes[i % randomBytes.length] % (i + 1);
+    const tmp = chars[i];
+    chars[i] = chars[j];
+    chars[j] = tmp;
+  }
+  return chars.join('');
+}
+
 export const StaffAdmin: React.FC<StaffAdminProps> = ({ onNavigate }) => {
   const {
+    authProviderMode,
+    isTestFixture,
     staffAccounts,
     staffInvitations,
     doctorSchedules,
@@ -60,6 +89,7 @@ export const StaffAdmin: React.FC<StaffAdminProps> = ({ onNavigate }) => {
     auditLogs,
     notifications,
     operationalAnalyticsEvents,
+    createStaffAccountAction,
     inviteStaffMemberAction,
     toggleStaffActiveStatusAction,
     updateStaffAccountRoleAction,
@@ -72,11 +102,14 @@ export const StaffAdmin: React.FC<StaffAdminProps> = ({ onNavigate }) => {
     markNotificationReadAction,
   } = useClinic();
 
+  const directAccountCreationMode = authProviderMode === 'supabase' || isTestFixture;
+
   const [activeTab, setActiveTab] = useState('overview');
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; text: string } | null>(null);
 
-  // Staff Invitation Form
+  // Staff Account Creation / Invitation Form
   const [invEmail, setInvEmail] = useState('');
+  const [invPassword, setInvPassword] = useState('');
   const [invName, setInvName] = useState('');
   const [invRole, setInvRole] = useState<StaffRole>('doctor');
   const [invDept, setInvDept] = useState('Outpatient Medicine');
@@ -278,6 +311,38 @@ export const StaffAdmin: React.FC<StaffAdminProps> = ({ onNavigate }) => {
           <form
             onSubmit={async (e) => {
               e.preventDefault();
+              const targetDash =
+                invRole === 'pharmacist'
+                  ? '/staff/pharmacy/dashboard'
+                  : `/staff/${invRole}/dashboard`;
+
+              if (directAccountCreationMode) {
+                const res = await createStaffAccountAction({
+                  email: invEmail,
+                  password: invPassword,
+                  fullName: invName,
+                  role: invRole,
+                  department: invDept,
+                  specialty: invRole === 'doctor' ? invSpec : '',
+                  titleDisplay: invTitle,
+                });
+                if (res.ok) {
+                  setFeedback({
+                    type: 'ok',
+                    text: `Created ${invRole.toUpperCase()} account for ${invName} (${invEmail}). Share the temporary password securely; on first login at /staff/login they must enroll Authenticator-App TOTP 2FA before accessing ${targetDash}.`,
+                  });
+                  setInvEmail('');
+                  setInvPassword('');
+                  setInvName('');
+                } else {
+                  setFeedback({
+                    type: 'err',
+                    text: res.error || 'Could not create staff account.',
+                  });
+                }
+                return;
+              }
+
               const res = await inviteStaffMemberAction({
                 email: invEmail,
                 fullName: invName,
@@ -287,10 +352,6 @@ export const StaffAdmin: React.FC<StaffAdminProps> = ({ onNavigate }) => {
                 titleDisplay: invTitle,
               });
               if (res.ok) {
-                const targetDash =
-                  invRole === 'pharmacist'
-                    ? '/staff/pharmacy/dashboard'
-                    : `/staff/${invRole}/dashboard`;
                 setFeedback({
                   type: 'ok',
                   text: `Staff invitation recorded for ${invEmail} (${invRole.toUpperCase()}). Have them sign in at /staff/login, claim their invitation, and enroll TOTP 2FA to auto-route to ${targetDash}.`,
@@ -304,19 +365,35 @@ export const StaffAdmin: React.FC<StaffAdminProps> = ({ onNavigate }) => {
             className="lg:col-span-5 rounded-xl border border-slate-200 bg-white p-6 space-y-3.5 text-xs"
           >
             <h2 className="font-display text-base font-bold text-slate-900">
-              Authorize &amp; Invite Clinic Staff Member
+              {directAccountCreationMode
+                ? 'Create Clinic Staff Account'
+                : 'Authorize & Invite Clinic Staff Member'}
             </h2>
             <p className="text-slate-500">
-              Staff accounts are never self-assigned. Authorized staff sign in at{' '}
-              <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-slate-800">
-                /staff/login
-              </code>
-              , claim their invitation, enroll mandatory Authenticator-App TOTP 2FA, and are
-              redirected to their role dashboard automatically.
+              {directAccountCreationMode ? (
+                <>
+                  Create verified staff accounts directly for Doctors, Nurses, Receptionists,
+                  Laboratory Technicians, and Pharmacists. Staff sign in at{' '}
+                  <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-slate-800">
+                    /staff/login
+                  </code>
+                  , enroll mandatory Authenticator-App TOTP 2FA, and route automatically to their
+                  role dashboard.
+                </>
+              ) : (
+                <>
+                  Staff accounts are never self-assigned. Authorized staff sign in at{' '}
+                  <code className="rounded bg-slate-100 px-1.5 py-0.5 font-mono text-slate-800">
+                    /staff/login
+                  </code>
+                  , claim their invitation, enroll mandatory Authenticator-App TOTP 2FA, and are
+                  redirected to their role dashboard automatically.
+                </>
+              )}
             </p>
             <div>
               <label htmlFor="st-email" className="block font-semibold text-slate-700">
-                Staff Work Email (Google or Email Account)
+                Staff Work Email
               </label>
               <input
                 id="st-email"
@@ -342,7 +419,34 @@ export const StaffAdmin: React.FC<StaffAdminProps> = ({ onNavigate }) => {
                 className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2"
               />
             </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {directAccountCreationMode && (
+              <div>
+                <div className="flex items-center justify-between gap-2">
+                  <label htmlFor="st-password" className="block font-semibold text-slate-700">
+                    Temporary Initial Password (min 10 characters)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setInvPassword(generateTemporaryStaffPassword())}
+                    className="rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-[11px] font-semibold text-blue-800 hover:bg-blue-100"
+                  >
+                    Generate Strong Password
+                  </button>
+                </div>
+                <input
+                  id="st-password"
+                  type="text"
+                  required
+                  minLength={10}
+                  autoComplete="off"
+                  placeholder="Min 10 characters (use Generate Strong Password)"
+                  value={invPassword}
+                  onChange={(e) => setInvPassword(e.target.value)}
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 font-mono"
+                />
+              </div>
+            )}
+            <div className="grid grid-cols-1 gap-3">
               <div>
                 <label htmlFor="st-role" className="block font-semibold text-slate-700">
                   Assigned Staff Role
@@ -450,7 +554,9 @@ export const StaffAdmin: React.FC<StaffAdminProps> = ({ onNavigate }) => {
               type="submit"
               className="w-full rounded-lg bg-blue-700 px-4 py-2.5 font-semibold text-white hover:bg-blue-800"
             >
-              Create Authorized Staff Invitation
+              {directAccountCreationMode
+                ? 'Create Staff Account'
+                : 'Create Authorized Staff Invitation'}
             </button>
           </form>
 

@@ -9,10 +9,7 @@ import {
   ShieldCheck,
   Stethoscope,
 } from 'lucide-react';
-import {
-  DESIGNATED_BOOTSTRAP_ADMIN_EMAIL,
-  useClinic,
-} from '../services/clinicStore';
+import { useClinic } from '../services/clinicStore';
 import type { PatientPortalAccount } from '../types/clinic';
 
 interface PatientAuthViewProps {
@@ -697,6 +694,12 @@ interface StaffLoginViewProps {
 
 export const StaffLoginView: React.FC<StaffLoginViewProps> = ({ onNavigate }) => {
   const {
+    authProviderMode,
+    supabaseAccessToken,
+    supabaseBootstrapLocked,
+    supabaseBootstrapArmed,
+    supabaseCanBootstrapCurrentUser,
+    firebaseBootstrapStatus,
     firebaseUser,
     patientAccount,
     staffAccount,
@@ -749,11 +752,20 @@ export const StaffLoginView: React.FC<StaffLoginViewProps> = ({ onNavigate }) =>
     if (firebaseUser && staffAccount && !staffAccount.mfaEnrolled && !enrollData) {
       (async () => {
         try {
-          const resp = await fetch('/api/mfa/setup', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ uid: firebaseUser.uid, email: firebaseUser.email }),
-          });
+          const resp =
+            authProviderMode === 'supabase'
+              ? await fetch('/api/supabase/mfa/setup', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    Authorization: `Bearer ${supabaseAccessToken}`,
+                  },
+                })
+              : await fetch('/api/mfa/setup', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ uid: firebaseUser.uid, email: firebaseUser.email }),
+                });
           const data = await resp.json();
           if (!resp.ok) throw new Error(data.error || 'MFA setup error');
           if (active) {
@@ -773,14 +785,14 @@ export const StaffLoginView: React.FC<StaffLoginViewProps> = ({ onNavigate }) =>
     return () => {
       active = false;
     };
-  }, [firebaseUser, staffAccount, enrollData]);
+  }, [firebaseUser, staffAccount, enrollData, authProviderMode, supabaseAccessToken]);
 
   const handleStaffEmailSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setInfoMsg('');
     setBusy(true);
-    if (staffCredMode === 'invited_register') {
+    if (authProviderMode !== 'supabase' && staffCredMode === 'invited_register') {
       const res = await registerInvitedStaffEmailAction({ email, password });
       setBusy(false);
       if (!res.ok) {
@@ -797,7 +809,7 @@ export const StaffLoginView: React.FC<StaffLoginViewProps> = ({ onNavigate }) =>
     if (!res.ok) {
       setErrorMsg(
         res.code === 'auth/operation-not-allowed'
-          ? 'Email/Password Sign-In is currently disabled in Firebase Console. Use "Sign In with Verified Staff Google Account" above or enable Email/Password in Firebase Console -> Authentication.'
+          ? 'Email/Password Sign-In is currently disabled in Firebase Console, and external Supabase secrets (SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY) are not configured yet in AI Studio Secrets.'
           : res.error || 'Authentication failed.'
       );
     }
@@ -808,7 +820,7 @@ export const StaffLoginView: React.FC<StaffLoginViewProps> = ({ onNavigate }) =>
     setErrorMsg('');
     setBusy(true);
     const res = await bootstrapInitialAdminAction(
-      adminFullName || firebaseUser?.displayName || 'Clinic Administrator'
+      adminFullName || firebaseUser?.displayName || 'System Administrator'
     );
     setBusy(false);
     if (!res.ok) setErrorMsg(res.error || 'Initial Administrator setup failed.');
@@ -828,6 +840,35 @@ export const StaffLoginView: React.FC<StaffLoginViewProps> = ({ onNavigate }) =>
     setErrorMsg('');
     setBusy(true);
     try {
+      if (authProviderMode === 'supabase') {
+        const resp = await fetch('/api/supabase/mfa/confirm', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${supabaseAccessToken}`,
+          },
+          body: JSON.stringify({
+            encryptedSecret: enrollData.encryptedSecret,
+            recoveryHashes: enrollData.recoveryHashes,
+            code: totpCode,
+          }),
+        });
+        const data = await resp.json();
+        if (!resp.ok || !data.verified) {
+          setErrorMsg(data.error || 'Invalid 6-digit code. Scan the QR code and try again.');
+          setBusy(false);
+          return;
+        }
+        await completeStaffMfaEnrollment({
+          encryptedSecret: '',
+          recoveryHashes: [],
+          assuranceToken: data.assuranceToken,
+          expiresAtMs: data.expiresAtMs,
+          alreadyPersistedOnServer: true,
+        });
+        return;
+      }
+
       const resp = await fetch('/api/mfa/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -867,18 +908,31 @@ export const StaffLoginView: React.FC<StaffLoginViewProps> = ({ onNavigate }) =>
     setErrorMsg('');
     setBusy(true);
     try {
-      const resp = await fetch('/api/mfa/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          uid: firebaseUser.uid,
-          role: staffAccount.role,
-          encryptedSecret: staffAccount.mfaEncryptedSecret,
-          code: useRecoveryMode ? undefined : totpCode,
-          recoveryCode: useRecoveryMode ? recoveryInput : undefined,
-          recoveryHashes: staffAccount.mfaRecoveryHashes,
-        }),
-      });
+      const resp =
+        authProviderMode === 'supabase'
+          ? await fetch('/api/supabase/mfa/verify', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                Authorization: `Bearer ${supabaseAccessToken}`,
+              },
+              body: JSON.stringify({
+                code: useRecoveryMode ? undefined : totpCode,
+                recoveryCode: useRecoveryMode ? recoveryInput : undefined,
+              }),
+            })
+          : await fetch('/api/mfa/verify', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                uid: firebaseUser.uid,
+                role: staffAccount.role,
+                encryptedSecret: staffAccount.mfaEncryptedSecret,
+                code: useRecoveryMode ? undefined : totpCode,
+                recoveryCode: useRecoveryMode ? recoveryInput : undefined,
+                recoveryHashes: staffAccount.mfaRecoveryHashes,
+              }),
+            });
       const data = await resp.json();
       if (!resp.ok || !data.verified) {
         setErrorMsg(data.error || 'Invalid verification code.');
@@ -895,6 +949,18 @@ export const StaffLoginView: React.FC<StaffLoginViewProps> = ({ onNavigate }) =>
       setBusy(false);
     }
   };
+
+  // CRITICAL: Never allow client-side or first-login auto-admin promotion!
+  // Only true when verified on the backend via Firebase Admin SDK / Supabase service role against the exact designated UID.
+  const canRunBootstrap =
+    authProviderMode === 'supabase'
+      ? supabaseCanBootstrapCurrentUser
+      : firebaseBootstrapStatus.canBootstrapCurrentUser;
+
+  const isBootstrapAlreadyLocked =
+    authProviderMode === 'supabase'
+      ? supabaseBootstrapLocked
+      : Boolean(firebaseBootstrapStatus.bootstrapLocked || roster.bootstrappedAdminUid);
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col justify-center py-10 px-4 sm:px-6 lg:px-8">
@@ -922,8 +988,8 @@ export const StaffLoginView: React.FC<StaffLoginViewProps> = ({ onNavigate }) =>
                 Unified Staff Portal Sign In
               </h1>
               <p className="text-xs text-slate-500">
-                Role is determined automatically from verified clinic staff records. Mandatory TOTP
-                2FA enforced.
+                Role is determined automatically from verified clinic staff records. Mandatory
+                Authenticator-App TOTP 2FA enforced.
               </p>
             </div>
           </div>
@@ -945,61 +1011,65 @@ export const StaffLoginView: React.FC<StaffLoginViewProps> = ({ onNavigate }) =>
           {/* Step 1: Not yet signed in */}
           {!firebaseUser && (
             <div className="space-y-5">
-              <button
-                type="button"
-                disabled={busy}
-                onClick={async () => {
-                  setErrorMsg('');
-                  setInfoMsg('');
-                  setBusy(true);
-                  const res = await signInWithGoogleAction();
-                  setBusy(false);
-                  if (!res.ok && res.error) setErrorMsg(res.error);
-                }}
-                className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-              >
-                <ShieldCheck className="h-4 w-4 text-blue-700" />
-                Sign In with Verified Staff Google Account
-              </button>
+              {authProviderMode !== 'supabase' && (
+                <>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={async () => {
+                      setErrorMsg('');
+                      setInfoMsg('');
+                      setBusy(true);
+                      const res = await signInWithGoogleAction();
+                      setBusy(false);
+                      if (!res.ok && res.error) setErrorMsg(res.error);
+                    }}
+                    className="flex w-full items-center justify-center gap-2 rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+                  >
+                    <ShieldCheck className="h-4 w-4 text-blue-700" />
+                    Sign In with Verified Staff Google Account
+                  </button>
 
-              <div className="relative flex items-center">
-                <div className="grow border-t border-slate-200" />
-                <span className="mx-3 shrink-0 text-[11px] uppercase tracking-wider text-slate-400">
-                  Or Staff Email &amp; Password
-                </span>
-                <div className="grow border-t border-slate-200" />
-              </div>
+                  <div className="relative flex items-center">
+                    <div className="grow border-t border-slate-200" />
+                    <span className="mx-3 shrink-0 text-[11px] uppercase tracking-wider text-slate-400">
+                      Or Staff Email &amp; Password
+                    </span>
+                    <div className="grow border-t border-slate-200" />
+                  </div>
 
-              <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1 text-xs">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setErrorMsg('');
-                    setStaffCredMode('signin');
-                  }}
-                  className={`rounded-md py-1.5 font-semibold transition-colors ${
-                    staffCredMode === 'signin'
-                      ? 'bg-white text-slate-900 shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Existing Staff Login
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setErrorMsg('');
-                    setStaffCredMode('invited_register');
-                  }}
-                  className={`rounded-md py-1.5 font-semibold transition-colors ${
-                    staffCredMode === 'invited_register'
-                      ? 'bg-white text-slate-900 shadow-2xs'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  Invited Staff Set Password
-                </button>
-              </div>
+                  <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-100 p-1 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setErrorMsg('');
+                        setStaffCredMode('signin');
+                      }}
+                      className={`rounded-md py-1.5 font-semibold transition-colors ${
+                        staffCredMode === 'signin'
+                          ? 'bg-white text-slate-900 shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Existing Staff Login
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setErrorMsg('');
+                        setStaffCredMode('invited_register');
+                      }}
+                      className={`rounded-md py-1.5 font-semibold transition-colors ${
+                        staffCredMode === 'invited_register'
+                          ? 'bg-white text-slate-900 shadow-2xs'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Invited Staff Set Password
+                    </button>
+                  </div>
+                </>
+              )}
 
               <form onSubmit={handleStaffEmailSubmit} className="space-y-4">
                 <div>
@@ -1017,7 +1087,7 @@ export const StaffLoginView: React.FC<StaffLoginViewProps> = ({ onNavigate }) =>
                 </div>
                 <div>
                   <label htmlFor="staff-pass" className="block text-xs font-semibold text-slate-700">
-                    {staffCredMode === 'invited_register'
+                    {authProviderMode !== 'supabase' && staffCredMode === 'invited_register'
                       ? 'Create Staff Password (min 8 characters)'
                       : 'Password'}
                   </label>
@@ -1025,7 +1095,11 @@ export const StaffLoginView: React.FC<StaffLoginViewProps> = ({ onNavigate }) =>
                     id="staff-pass"
                     type="password"
                     required
-                    minLength={staffCredMode === 'invited_register' ? 8 : undefined}
+                    minLength={
+                      authProviderMode !== 'supabase' && staffCredMode === 'invited_register'
+                        ? 8
+                        : undefined
+                    }
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
@@ -1038,9 +1112,9 @@ export const StaffLoginView: React.FC<StaffLoginViewProps> = ({ onNavigate }) =>
                 >
                   {busy
                     ? 'Processing...'
-                    : staffCredMode === 'invited_register'
+                    : authProviderMode !== 'supabase' && staffCredMode === 'invited_register'
                     ? 'Create Staff Credentials & Verify Email'
-                    : 'Continue to 2FA Verification'}
+                    : 'Sign In & Proceed to 2FA'}
                 </button>
               </form>
             </div>
@@ -1054,8 +1128,9 @@ export const StaffLoginView: React.FC<StaffLoginViewProps> = ({ onNavigate }) =>
                   Verify Your Staff Email ({firebaseUser.email})
                 </p>
                 <p>
-                  For clinical security, SmartClinic requires a verified email address before
-                  activating an Admin-issued staff invitation or enrolling Authenticator 2FA.
+                  {authProviderMode === 'supabase'
+                    ? 'Confirm this user email in your Supabase Dashboard (Authentication -> Users) before completing one-time Administrator bootstrap or enrolling Authenticator 2FA.'
+                    : 'For clinical security, SmartClinic requires a verified email address before activating an Admin-issued staff invitation or enrolling Authenticator 2FA.'}
                 </p>
               </div>
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1066,49 +1141,70 @@ export const StaffLoginView: React.FC<StaffLoginViewProps> = ({ onNavigate }) =>
                 >
                   Sign Out
                 </button>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const res = await resendEmailVerificationAction();
-                      if (res.ok) setInfoMsg('Verification email re-sent.');
-                      else setErrorMsg(res.error || 'Could not resend verification email.');
-                    }}
-                    className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700"
-                  >
-                    Resend Link
-                  </button>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      const ok = await refreshEmailVerificationStatus();
-                      if (!ok) setErrorMsg('Email is not verified yet. Check your inbox first.');
-                    }}
-                    className="rounded-lg bg-blue-700 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-800"
-                  >
-                    I Verified My Email
-                  </button>
-                </div>
+                {authProviderMode !== 'supabase' && (
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const res = await resendEmailVerificationAction();
+                        if (res.ok) setInfoMsg('Verification email re-sent.');
+                        else setErrorMsg(res.error || 'Could not resend verification email.');
+                      }}
+                      className="rounded-lg border border-slate-300 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700"
+                    >
+                      Resend Link
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        const ok = await refreshEmailVerificationStatus();
+                        if (!ok) setErrorMsg('Email is not verified yet. Check your inbox first.');
+                      }}
+                      className="rounded-lg bg-blue-700 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-800"
+                    >
+                      I Verified My Email
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}
 
-          {/* Step 2A: Signed in & Verified, no Staff Account yet, Initial Administrator not yet bootstrapped */}
+          {/* Step 2A: Trusted One-Time Server-Side Initial Administrator Setup */}
           {firebaseUser &&
             firebaseUser.emailVerified &&
             !staffAccount &&
-            !roster.bootstrappedAdminUid &&
-            firebaseUser.email.trim().toLowerCase() === DESIGNATED_BOOTSTRAP_ADMIN_EMAIL && (
+            canRunBootstrap && (
               <form onSubmit={handleBootstrapAdmin} className="space-y-4">
                 <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-4 text-xs text-slate-700 space-y-1.5">
                   <p className="font-semibold text-blue-900">
-                    Initial Clinic Administrator Setup (Designated Project Owner Verified)
+                    One-Time First System Administrator Bootstrap Verified
                   </p>
                   <p>
-                    No Clinic Administrator has been provisioned yet. Because SmartClinic never ships
-                    hardcoded default passwords or public admin registration, your verified project
-                    owner account (<strong>{firebaseUser.email}</strong>) is authorized to initialize
-                    the primary Administrator role and enroll mandatory Authenticator-App TOTP 2FA.
+                    {authProviderMode === 'supabase' ? (
+                      <>
+                        Your Supabase Auth session (<strong>{firebaseUser.email}</strong>, UID{' '}
+                        <code className="rounded bg-white px-1 py-0.5 font-mono text-[11px]">
+                          {firebaseUser.uid}
+                        </code>
+                        ) matches the server&apos;s designated{' '}
+                        <code>SUPABASE_INITIAL_ADMIN_USER_ID</code>. Submitting below assigns your
+                        System Administrator role on the backend, permanently disables bootstrap, and
+                        proceeds to mandatory Authenticator-App TOTP 2FA enrollment.
+                      </>
+                    ) : (
+                      <>
+                        Your Google / Firebase Auth session (<strong>{firebaseUser.email}</strong>, UID{' '}
+                        <code className="rounded bg-white px-1 py-0.5 font-mono text-[11px]">
+                          {firebaseUser.uid}
+                        </code>
+                        ) matches the server&apos;s designated{' '}
+                        <code>FIREBASE_INITIAL_ADMIN_UID</code>. Submitting below executes the
+                        one-time Firebase Admin SDK assignment on the backend, permanently locks
+                        bootstrap, and proceeds to mandatory Authenticator-App TOTP 2FA before
+                        entering <code>/staff/admin/dashboard</code>.
+                      </>
+                    )}
                   </p>
                   {patientAccount && (
                     <p className="text-emerald-800 font-medium">
@@ -1128,6 +1224,7 @@ export const StaffLoginView: React.FC<StaffLoginViewProps> = ({ onNavigate }) =>
                     id="admin-init-name"
                     type="text"
                     required
+                    placeholder="e.g. Patrick Cervito"
                     value={adminFullName || firebaseUser.displayName}
                     onChange={(e) => setAdminFullName(e.target.value)}
                     className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
@@ -1146,7 +1243,7 @@ export const StaffLoginView: React.FC<StaffLoginViewProps> = ({ onNavigate }) =>
                     disabled={busy}
                     className="rounded-lg bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-800"
                   >
-                    {busy ? 'Initializing...' : 'Initialize Administrator & Proceed to 2FA'}
+                    {busy ? 'Bootstrapping...' : 'Complete One-Time Admin Bootstrap'}
                   </button>
                 </div>
               </form>
@@ -1156,19 +1253,39 @@ export const StaffLoginView: React.FC<StaffLoginViewProps> = ({ onNavigate }) =>
           {firebaseUser &&
             firebaseUser.emailVerified &&
             !staffAccount &&
-            !roster.bootstrappedAdminUid &&
-            firebaseUser.email.trim().toLowerCase() !== DESIGNATED_BOOTSTRAP_ADMIN_EMAIL && (
+            !isBootstrapAlreadyLocked &&
+            !canRunBootstrap && (
               <div className="space-y-4">
-                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-950 space-y-1.5">
+                <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-xs text-amber-950 space-y-2">
                   <p className="font-semibold">
-                    Clinic Administrator Not Yet Initialized
+                    Initial System Administrator Not Yet Activated
                   </p>
-                  <p>
-                    Signed in as <strong>{firebaseUser.email}</strong>. Public administrator
-                    registration is disabled for security. The designated SmartClinic project owner
-                    must sign in first to initialize the primary Administrator account and issue
-                    staff invitations.
-                  </p>
+                  {authProviderMode === 'supabase' ? (
+                    <p>
+                      {!supabaseBootstrapArmed
+                        ? `Signed in as ${firebaseUser.email}. Server bootstrap is not armed yet: set SUPABASE_INITIAL_ADMIN_USER_ID in AI Studio Secrets to your exact Supabase Auth User ID (${firebaseUser.uid}) and restart.`
+                        : `Signed in as ${firebaseUser.email} (UID ${firebaseUser.uid}). Public administrator registration is disabled—only the exact Supabase Auth User ID configured in SUPABASE_INITIAL_ADMIN_USER_ID may execute the one-time bootstrap.`}
+                    </p>
+                  ) : (
+                    <>
+                      <p>
+                        Signed in via Firebase Auth as <strong>{firebaseUser.email}</strong> (UID:{' '}
+                        <code className="rounded bg-white px-1.5 py-0.5 font-mono text-[11px] text-slate-900 select-all">
+                          {firebaseUser.uid}
+                        </code>
+                        ).
+                      </p>
+                      <p>
+                        Unrestricted public Admin registration and automatic first-login Admin
+                        promotion are disabled. Activate the first System Administrator using the
+                        trusted server-side Firebase Admin SDK one-time script (
+                        <code>npm run bootstrap:admin</code>) or configure{' '}
+                        <code>FIREBASE_INITIAL_ADMIN_UID</code> +{' '}
+                        <code>FIREBASE_SERVICE_ACCOUNT_JSON</code> in server secrets, then sign in
+                        again here to proceed to <code>/staff/admin/dashboard</code>.
+                      </p>
+                    </>
+                  )}
                 </div>
                 <button
                   type="button"
@@ -1180,20 +1297,20 @@ export const StaffLoginView: React.FC<StaffLoginViewProps> = ({ onNavigate }) =>
               </div>
             )}
 
-          {/* Step 2B: Signed in & Verified, no Staff Account yet, Clinic Admin already exists -> Claim Invitation */}
+          {/* Step 2B: Signed in & Verified, no Staff Account yet, Bootstrap already permanently locked */}
           {firebaseUser &&
             firebaseUser.emailVerified &&
             !staffAccount &&
-            Boolean(roster.bootstrappedAdminUid) && (
+            isBootstrapAlreadyLocked && (
               <div className="space-y-4">
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 text-xs text-slate-700 space-y-1.5">
                   <p className="font-semibold text-slate-900">
                     Signed in as {firebaseUser.email}
                   </p>
                   <p>
-                    Staff roles cannot be self-registered. If the Clinic Administrator has created a
-                    staff invitation for your email address, activate it below to proceed to mandatory
-                    Authenticator 2FA enrollment and open your assigned role dashboard.
+                    {authProviderMode === 'supabase'
+                      ? 'One-time initial Administrator bootstrap is permanently disabled. Staff roles cannot be self-registered—contact the System Administrator to create your authorized clinic staff account from /staff/admin/dashboard.'
+                      : 'Staff roles cannot be self-registered. If the Clinic Administrator has created a staff invitation for your email address, activate it below to proceed to mandatory Authenticator 2FA enrollment.'}
                   </p>
                 </div>
                 <div className="flex items-center justify-between gap-3">
@@ -1204,14 +1321,16 @@ export const StaffLoginView: React.FC<StaffLoginViewProps> = ({ onNavigate }) =>
                   >
                     Sign Out
                   </button>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={handleClaimInvitation}
-                    className="rounded-lg bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-800"
-                  >
-                    {busy ? 'Checking Invitation...' : 'Claim Staff Invitation'}
-                  </button>
+                  {authProviderMode !== 'supabase' && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={handleClaimInvitation}
+                      className="rounded-lg bg-blue-700 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-800"
+                    >
+                      {busy ? 'Checking Invitation...' : 'Claim Staff Invitation'}
+                    </button>
+                  )}
                 </div>
               </div>
             )}

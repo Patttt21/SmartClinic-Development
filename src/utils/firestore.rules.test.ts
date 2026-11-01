@@ -8,8 +8,8 @@ const draftPath = path.resolve(process.cwd(), 'DRAFT_firestore.rules');
 const blueprintPath = path.resolve(process.cwd(), 'firebase-blueprint.json');
 
 function loadRulesText(): string {
-  if (fs.existsSync(rulesPath)) return fs.readFileSync(rulesPath, 'utf8');
-  return fs.readFileSync(draftPath, 'utf8');
+  if (fs.existsSync(draftPath)) return fs.readFileSync(draftPath, 'utf8');
+  return fs.readFileSync(rulesPath, 'utf8');
 }
 
 test('Firestore rules cover every collection in firebase-blueprint.json and enforce Global Default-Deny', () => {
@@ -20,7 +20,7 @@ test('Firestore rules cover every collection in firebase-blueprint.json and enfo
   assert.match(rules, /match\s+\/\{document=\*\*\}\s*\{\s*allow read, write: if false;\s*\}/);
 
   const collectionPaths = Object.keys(blueprint.firestore || {});
-  assert.ok(collectionPaths.length >= 25);
+  assert.ok(collectionPaths.length >= 26);
 
   for (const colPath of collectionPaths) {
     const collectionName = colPath.split('/')[1];
@@ -31,7 +31,7 @@ test('Firestore rules cover every collection in firebase-blueprint.json and enfo
   }
 });
 
-test('Dirty Dozen Red Team Audit: Zero get()/exists() in allow list blocks, no blanket reads, strict PII & clinical isolation', () => {
+test('Dirty Dozen Red Team Audit: Server-only Admin bootstrap lock, zero get()/exists() in allow list, strict PII & clinical isolation', () => {
   const rules = loadRulesText();
 
   // Extract all allow list lines
@@ -52,22 +52,64 @@ test('Dirty Dozen Red Team Audit: Zero get()/exists() in allow list blocks, no b
     );
   }
 
+  // Dirty Dozen #1: /bootstrap_locks/{lockId} strictly forbids all client writes (Firebase Admin SDK only)
+  const lockBlock = rules.split('match /bootstrap_locks/{lockId}')[1].split('match /admins/')[0];
+  assert.match(lockBlock, /allow list, create, update, delete:\s*if false;/);
+
+  // Dirty Dozen #1b: Zero client-side email self-bootstrap or first-login auto-admin in rules
+  assert.equal(
+    rules.includes('!exists(/databases/$(database)/documents/clinic_roster/current)'),
+    false,
+    'Client-side first-user bootstrap must be disabled; initial Admin is provisioned solely via Firebase Admin SDK'
+  );
+  assert.match(
+    rules,
+    /exists\(\/databases\/\$\(database\)\/documents\/admins\/\$\(request\.auth\.uid\)\)/
+  );
+  assert.match(
+    rules,
+    /get\(\/databases\/\$\(database\)\/documents\/staff_accounts\/\$\(request\.auth\.uid\)\)\.data\.role\s*==\s*'admin'/
+  );
+
   // Dirty Dozen #2: Email spoofing guard requires email_verified == true
   assert.match(rules, /request\.auth\.token\.email_verified\s*==\s*true/);
 
+  // Dirty Dozen #3: Non-admin staff self-update cannot escalate role or active flag, and bootstrapped Admin cannot be demoted
+  const staffAcctBlock = rules
+    .split('match /staff_accounts/{staffUid}')[1]
+    .split('match /staff_invitations/')[0];
+  assert.match(staffAcctBlock, /incoming\(\)\.role\s*==\s*existing\(\)\.role/);
+  assert.match(staffAcctBlock, /!isBootstrappedAdminUid\(staffUid\)/);
+
   // Dirty Dozen #5: patient_accounts forbids list completely
-  const patientAcctBlock = rules.split('match /patient_accounts/{userId}')[1].split('match /patients/')[0];
+  const patientAcctBlock = rules
+    .split('match /patient_accounts/{userId}')[1]
+    .split('match /patients/')[0];
   assert.match(patientAcctBlock, /allow list:\s*if false;/);
 
   // Dirty Dozen #6: Admin is NOT granted get access on confidential consultations or nursing_assessments
-  const consultBlock = rules.split('match /consultations/{visitId}')[1].split('match /lab_orders/')[0];
-  assert.equal(consultBlock.includes('isAdmin()'), false, 'Admin must not have automatic read access to confidential consultation notes');
+  const consultBlock = rules
+    .split('match /consultations/{visitId}')[1]
+    .split('match /lab_orders/')[0];
+  assert.equal(
+    consultBlock.includes('isAdmin()'),
+    false,
+    'Admin must not have automatic read access to confidential consultation notes'
+  );
 
-  const nurseBlock = rules.split('match /nursing_assessments/{visitId}')[1].split('match /consultations/')[0];
-  assert.equal(nurseBlock.includes('isAdmin()'), false, 'Admin must not have automatic read access to confidential nursing assessments');
+  const nurseBlock = rules
+    .split('match /nursing_assessments/{visitId}')[1]
+    .split('match /consultations/')[0];
+  assert.equal(
+    nurseBlock.includes('isAdmin()'),
+    false,
+    'Admin must not have automatic read access to confidential nursing assessments'
+  );
 
   // Dirty Dozen #8: Patient lab_orders read strictly checks Released status & patientVisible
-  const labBlock = rules.split('match /lab_orders/{orderId}')[1].split('match /prescriptions/')[0];
+  const labBlock = rules
+    .split('match /lab_orders/{orderId}')[1]
+    .split('match /prescriptions/')[0];
   assert.match(labBlock, /existing\(\)\.status\s*==\s*'Released'/);
 
   // Dirty Dozen #10 & #12: Temporal integrity & immutable audit_logs
@@ -77,18 +119,11 @@ test('Dirty Dozen Red Team Audit: Zero get()/exists() in allow list blocks, no b
   assert.match(auditBlock, /allow update:\s*if false;/);
   assert.match(auditBlock, /allow delete:\s*if false;/);
 
-  // Staff Portal RBAC Hardening: Initial Administrator bootstrap strictly requires isBootstrapOwner()
-  const adminsBlock = rules.split('match /admins/{adminUid}')[1].split('match /clinic_roster/')[0];
-  assert.match(adminsBlock, /isBootstrapOwner\(\)\s*&&\s*!exists\(\/databases\/\$\(database\)\/documents\/clinic_roster\/current\)/);
-
-  const rosterBlock = rules.split('match /clinic_roster/{docId}')[1].split('match /staff_accounts/')[0];
-  assert.match(rosterBlock, /isBootstrapOwner\(\)\s*&&\s*!exists\(\/databases\/\$\(database\)\/documents\/clinic_roster\/current\)/);
-
-  const staffAcctBlock = rules.split('match /staff_accounts/{staffUid}')[1].split('match /staff_invitations/')[0];
-  assert.match(staffAcctBlock, /isBootstrapOwner\(\)\s*&&\s*!exists\(\/databases\/\$\(database\)\/documents\/clinic_roster\/current\)/);
-
   // Staff Invitation RE2-safe emailToInviteId helper (must not use unescaped '.' regex)
   assert.match(rules, /function emailToInviteId\(email\)/);
-  assert.equal(rules.includes(".replace('.', '_')"), false, 'Must not use unescaped RE2 wildcard dot in Firestore rules');
+  assert.equal(
+    rules.includes(".replace('.', '_')"),
+    false,
+    'Must not use unescaped RE2 wildcard dot in Firestore rules'
+  );
 });
-
