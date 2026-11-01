@@ -1,0 +1,1406 @@
+# GOOGLE AI STUDIO MASTER PROMPT
+# BUILD SMARTCLINIC FROM SCRATCH — NEW PROJECT
+
+## PROJECT TITLE
+
+**SMARTCLINIC: A ROLE-BASED WEB APPLICATION INTEGRATING PREDICTIVE ANALYTICS FOR HEALTHCARE MANAGEMENT**
+
+## MAIN INSTRUCTION
+
+Act as a senior full-stack developer, healthcare information systems architect, database engineer, UI/UX designer, cybersecurity engineer, and predictive analytics developer.
+
+**Build an entirely new, fully functional SmartClinic web application from scratch.**
+
+This is a new project, not an update or modification of an existing application.
+
+Start with a clean project structure, new application components, a new database schema, new authentication configuration, and newly implemented workflows.
+
+Do not assume that an existing SmartClinic codebase, database, accounts, or modules are available.
+
+The goal is to build a complete outpatient clinic management system with connected role-based dashboards and genuine predictive analytics functionality.
+
+This must be a working full-stack web application, not just a static prototype or UI demonstration.
+
+All essential actions must connect to persistent application data and enforce appropriate backend authorization.
+
+The website must be responsive on mobile phones, tablets, laptops, and desktop computers.
+
+Use a clean, modern, blue-and-white healthcare interface that is simple to navigate.
+
+Avoid unnecessary complexity and paid services.
+
+---
+
+# 1. TECHNOLOGY STACK
+
+Use the following preferred technologies:
+
+- Frontend: React + TypeScript
+- Styling: Tailwind CSS
+- Backend: Node.js with secure server-side APIs
+- Database: Supabase PostgreSQL
+- Authentication: Supabase Auth
+- Role Authorization: Backend Role-Based Access Control and PostgreSQL Row Level Security
+- Staff Two-Factor Authentication: Authenticator-App TOTP
+- Realtime Updates: Supabase Realtime or equivalent
+- Charts: Recharts or equivalent
+- QR Code: QR generation and browser-based QR scanning
+- Documents: PDF generation with View, Download, and Print
+- Predictive Analytics: Statistical forecasting implemented with actual application logic
+- Repository: GitHub
+- Hosting: Vercel or another compatible free-tier provider
+
+Prioritize free-tier services suitable for an academic capstone demonstration.
+
+Do not require paid subscriptions for the initial application.
+
+Use secure environment variables for credentials.
+
+Never expose database service-role keys, account recovery secrets, or private API credentials in frontend code.
+
+Create a maintainable project structure, reusable components, typed data models, and database migration scripts.
+
+If external service setup is required, implement the compatible integration and provide clear configuration instructions.
+
+Do not falsely claim that unconfigured external services are already working.
+
+---
+
+# 2. APPLICATION ARCHITECTURE
+
+Build three clearly separated interfaces within the same application.
+
+## A. Public Website
+
+The public website is accessible to visitors without logging in.
+
+Include:
+
+- Home
+- About Us
+- Clinic Services
+- Our Doctors
+- Patient Guide
+- Contact Us
+- Patient Login
+- Patient Registration
+
+The public website must have a professional, welcoming healthcare layout.
+
+Do not display Staff Login, Admin Login, Doctor Login, Nurse Login, Lab Tech Login, or Pharmacist Login options on the public patient-facing navigation.
+
+## B. Patient Portal
+
+Create a separate protected Patient Dashboard.
+
+Example routes:
+
+- `/patient/login`
+- `/patient/register`
+- `/patient/dashboard`
+- `/patient/appointments`
+- `/patient/medical-records`
+- `/patient/laboratory`
+- `/patient/prescriptions`
+- `/patient/billing`
+- `/patient/follow-up`
+- `/patient/guide`
+- `/patient/profile`
+
+Only authenticated and authorized patients may access personal portal information.
+
+## C. Staff Portal
+
+Create a separate secure Staff Portal.
+
+Example routes:
+
+- `/staff/login`
+- `/staff/admin/dashboard`
+- `/staff/receptionist/dashboard`
+- `/staff/nurse/dashboard`
+- `/staff/doctor/dashboard`
+- `/staff/laboratory/dashboard`
+- `/staff/pharmacy/dashboard`
+
+All six staff roles must use one Staff Login interface.
+
+Do not ask users to choose their role manually when logging in.
+
+Determine their assigned role from secure database records.
+
+Require successful two-factor authentication before allowing access to staff functions.
+
+Each role must have its own dashboard and authorized workflows.
+
+All three interfaces must communicate through one secure backend and centralized database.
+
+Do not implement clinic branches, Emergency Contact, Emergency Department management, ambulance dispatch, or inpatient hospital management.
+
+SmartClinic is an outpatient clinic management system.
+
+---
+
+# 3. USER ROLES
+
+Implement seven roles:
+
+1. Patient
+2. Receptionist
+3. Nurse
+4. Doctor
+5. Laboratory Technician
+6. Pharmacist
+7. Admin
+
+The initial planned clinic staffing is:
+
+- 3 Doctors
+- 2 Nurses
+- 2 Receptionists
+- 1 Laboratory Technician
+- 1 Pharmacist
+- 1 Admin
+
+These are configurable staffing targets, not hardcoded maximum account limits.
+
+Allow the Admin to create and manage actual staff accounts.
+
+Do not invent real staff identities, license information, or medical credentials.
+
+There must be no fixed maximum number of patient accounts.
+
+Create a secure initial administrator setup process without publishing default passwords or hardcoded administrator credentials.
+
+Use least-privilege permissions for every role.
+
+---
+
+# 4. PATIENT DASHBOARD
+
+Create a professional and user-friendly Patient Dashboard.
+
+Include the following navigation:
+
+- Dashboard
+- Book Appointment
+- My Appointments
+- Appointment QR Code
+- Medical Records
+- Laboratory Results
+- Prescriptions
+- Billing and Receipts
+- Follow-up Care
+- Patient Guide
+- Notifications
+- My Profile
+- Logout
+
+The dashboard homepage should show:
+
+- Upcoming Appointment
+- Appointment Status
+- Appointment QR Code
+- Recent Released Documents
+- Follow-up Recommendations
+- Important Notifications
+
+Use summary cards rather than displaying all forms and records at once.
+
+Each feature must open a dedicated page.
+
+All dashboard components must work properly on mobile devices.
+
+---
+
+# 5. PATIENT REGISTRATION AND PERMANENT RECORDS
+
+Use email/password account registration with supported email verification for the initial free-tier implementation.
+
+A mobile phone number may be stored as contact information, but SMS OTP must not be required.
+
+Maintain a distinction between:
+
+**Patient Portal Account:** The account used for logging in.
+
+**Clinical Patient Record:** The permanent healthcare record used by clinic personnel.
+
+Every patient must have a permanent Patient ID.
+
+Every consultation must have a separate Visit or Encounter ID.
+
+Patients must not be required to own an online account to receive walk-in care.
+
+A completely new patient must have an empty consultation history.
+
+Do not automatically generate medical records, diagnoses, or consultations.
+
+## Existing Record Linking
+
+Allow a former walk-in patient to create an online account and request linkage to their existing clinical record.
+
+Workflow:
+
+1. Create patient account.
+2. Complete account verification.
+3. Request existing record linking.
+4. Search for a possible clinical match without exposing confidential information.
+5. Require additional identity verification.
+6. Perform authorized staff verification when necessary.
+7. Link the account to the permanent Patient ID.
+8. Display eligible previous released records.
+
+Never automatically link accounts based only on matching names or contact information.
+
+Prevent duplicate profiles and unauthorized record access.
+
+---
+
+# 6. ONLINE APPOINTMENT BOOKING
+
+Build a real-time appointment availability system.
+
+Booking workflow:
+
+1. Select Consultation Service.
+2. Choose Specific Doctor or Any Available Doctor.
+3. Select Available Appointment Date.
+4. Display Available Time Slots.
+5. Select Time.
+6. Review Appointment.
+7. Confirm Booking.
+8. Generate Appointment QR Code and Reference Number.
+
+Available dates and times must be calculated from:
+
+- Doctor schedules
+- Consultation duration
+- Service availability
+- Break times
+- Approved leave
+- Existing appointments
+- Doctor capacity
+
+Do not use hardcoded or randomly generated available slots.
+
+Support General Consultation and appropriate Doctor-recommended Follow-up Consultation as directly bookable services.
+
+Laboratory tests must follow authorized Doctor orders.
+
+## Specific Doctor
+
+Display only the selected Doctor's actual available slots.
+
+## Any Available Doctor
+
+Display appointment slots from eligible available Doctors.
+
+Automatically assign a qualified Doctor during confirmation and show the assigned Doctor to the patient.
+
+## Booking Rules
+
+- Prevent past-date booking.
+- Prevent double booking.
+- Block unavailable Doctor schedules.
+- Respect service duration.
+- Use secure atomic transactions and database constraints.
+- Revalidate availability on the backend before confirming an appointment.
+- Automatically confirm standard bookings once a valid slot is reserved.
+
+Do not create an unnecessary manual approval step for every ordinary patient booking.
+
+---
+
+# 7. APPOINTMENT CANCELLATION AND RESCHEDULING
+
+Allow patients to cancel and reschedule eligible appointments.
+
+Implement this custom rule:
+
+**For patient-initiated cancellation or rescheduling, the previous appointment date cannot be selected again for the replacement booking.**
+
+Example:
+
+Original Appointment: November 2 at 10:00 AM.
+
+After voluntary cancellation or rescheduling, the replacement appointment must be scheduled no earlier than November 3, depending on actual availability.
+
+This restriction must be enforced on the backend and linked to the affected booking.
+
+The released slot may become available to other eligible patients.
+
+### Clinic-Initiated Changes
+
+If a Doctor becomes unavailable because of approved leave or a clinic schedule change, allow the patient to choose an alternative qualified Doctor on the same date when possible.
+
+Do not apply the patient-initiated restriction to clinic-initiated changes.
+
+During rescheduling, preserve the original reservation until a replacement is successfully confirmed.
+
+After a successful change:
+
+- Update the appointment record.
+- Invalidate the old QR token.
+- Generate a new QR when applicable.
+- Update appointment reminders.
+- Notify the patient and relevant staff.
+- Preserve appointment history.
+
+---
+
+# 8. APPOINTMENT QR CODE
+
+Every confirmed appointment must have:
+
+- Unique reference number
+- Secure QR token
+- Assigned Doctor
+- Appointment date
+- Appointment time
+- Appointment status
+
+Allow the patient to view the QR on a phone or print an appointment confirmation.
+
+The Receptionist must have a working QR Scanner with mobile camera support where permissions allow.
+
+Provide manual reference-number lookup as a fallback.
+
+QR check-in workflow:
+
+1. Scan QR code.
+2. Validate token on the backend.
+3. Retrieve the appointment.
+4. Verify patient identity.
+5. Confirm valid check-in.
+6. Record check-in timestamp.
+7. Activate or create the appropriate Visit ID.
+8. Place patient in the Nurse Queue.
+9. Notify authorized staff.
+
+Reject invalid, expired, cancelled, already-used, or replaced QR tokens as appropriate.
+
+Do not store sensitive medical details inside QR codes.
+
+---
+
+# 9. WALK-IN PATIENT REGISTRATION
+
+Support patients who visit without an online appointment or portal account.
+
+Receptionist workflow:
+
+1. Patient arrives.
+2. Search existing records.
+3. Verify identity.
+4. Reuse permanent Patient ID if returning.
+5. Create Patient ID if first-time patient.
+6. Create a new Visit ID.
+7. Register the visit.
+8. Assign queue number.
+9. Send patient to the Nurse Queue.
+
+Do not require returning walk-in patients to repeatedly register their full personal details.
+
+Keep a separate front-desk intake flow and unified clinical queue.
+
+---
+
+# 10. UNIFIED PATIENT QUEUE
+
+Combine checked-in online appointments and walk-ins into one clinical queue.
+
+Track:
+
+- Queue Number
+- Patient ID
+- Visit ID
+- Appointment Type
+- Assigned Doctor
+- Scheduled Time
+- Arrival Time
+- Queue Status
+- Appropriate Clinical Priority
+
+Suggested workflow:
+
+Checked In → Waiting for Nurse → In Assessment → Ready for Doctor → In Consultation → Consultation Completed → Checked Out.
+
+Support sensible appointment priority, walk-in order, and nursing triage.
+
+Do not create duplicate active encounters for a single visit.
+
+Clinical situations requiring emergency-level care should be referred appropriately, but do not create an Emergency Department module.
+
+Queue updates must automatically synchronize across relevant staff dashboards.
+
+---
+
+# 11. RECEPTIONIST DASHBOARD
+
+Implement:
+
+- Today's Appointments
+- QR Scanner
+- Walk-in Registration
+- Patient Lookup
+- Check-in
+- Queue Management
+- Appointment Assistance
+- Billing and Payments
+- Coverage Information
+- Patient Check-out
+- Notifications
+
+Receptionists must handle administrative workflows without being able to change Doctor diagnoses, laboratory findings, or prescriptions.
+
+---
+
+# 12. NURSE DASHBOARD
+
+Implement:
+
+- Patient Queue
+- Patient Summary
+- Relevant Medical History
+- Vital Signs
+- Initial Assessment
+- Nursing Notes
+- Doctor Handoff
+- Notifications
+
+Allow structured recording of:
+
+- Blood Pressure
+- Body Temperature
+- Pulse Rate
+- Respiratory Rate
+- Oxygen Saturation
+- Chief Complaint
+- Additional Symptoms
+- Symptom Onset
+- Nursing Observations
+
+When assessment is completed, change the encounter status to Ready for Doctor.
+
+Automatically notify the assigned Doctor.
+
+The Doctor must be able to see the Nurse assessment without re-entering the same information.
+
+---
+
+# 13. DOCTOR DASHBOARD
+
+Implement:
+
+- Today's Patient Queue
+- Start Consultation
+- Patient Medical History
+- Nurse Assessment
+- Consultation Notes
+- Diagnosis
+- Treatment Plan
+- Laboratory Orders
+- Pending Lab Results
+- Prescriptions
+- Follow-up Recommendations
+- Doctor Schedule
+- Notifications
+
+Consultation workflow:
+
+1. Select Ready for Doctor patient.
+2. Review assessment and relevant medical history.
+3. Start consultation.
+4. Record clinical findings.
+5. Document diagnosis or provisional diagnosis.
+6. Add treatment plan.
+7. Create optional laboratory order.
+8. Create optional prescription.
+9. Add follow-up recommendation.
+10. Save draft or finalize consultation.
+
+Do not require every patient to receive laboratory tests or medicines.
+
+Finalized records must support authorized amendments with audit history rather than silent editing.
+
+Doctors must be notified when authorized laboratory results are released.
+
+---
+
+# 14. LABORATORY DASHBOARD
+
+Implement:
+
+- New Laboratory Requests
+- Sample Collection
+- Sample Tracking
+- Test Processing
+- Result Entry
+- Result Verification
+- Released Results
+- Laboratory History
+- Notifications
+
+Workflow:
+
+Doctor Order → Lab Request → Sample Collection → Processing → Result Entry → Authorized Verification → Result Release → Doctor Review.
+
+Statuses:
+
+- Requested
+- Sample Collected
+- Processing
+- For Verification
+- Verified
+- Released
+
+Unverified results must not automatically appear as finalized patient documents.
+
+Implement appropriate qualified verification and professional sign-off.
+
+---
+
+# 15. PHARMACIST DASHBOARD
+
+Implement:
+
+- Prescription Queue
+- Prescription Review
+- Medicine Inventory
+- Dispensing
+- Stock Monitoring
+- Expiry Alerts
+- Dispensing History
+- Notifications
+
+Workflow:
+
+Doctor Finalizes Prescription → Pharmacist Reviews → Checks Stock → Dispenses → Records Dispensing Status.
+
+Statuses:
+
+- Received
+- Under Review
+- Needs Clarification
+- Ready for Dispensing
+- Partially Dispensed
+- Dispensed
+- Not Available
+
+Notify the Doctor when clarification is required.
+
+Do not allow Pharmacists to silently modify signed prescriptions.
+
+---
+
+# 16. ADMIN DASHBOARD
+
+Implement:
+
+- Dashboard Overview
+- User Management
+- Staff Management
+- Role Permissions
+- Doctor Scheduling
+- Leave Management
+- Clinic Services Management
+- Appointment Monitoring
+- Patient Administrative Records
+- Billing Reports
+- HMO / PhilHealth Coverage Settings
+- Patient Guide Management
+- Notification Management
+- Predictive Analytics
+- Security and Audit Logs
+- System Settings
+
+Admin manages operational functions and role permissions.
+
+Do not grant automatic unrestricted access to confidential medical notes merely because an account has the Admin role.
+
+## Doctor Schedule Management
+
+Configure:
+
+- Workdays
+- Working Hours
+- Break Times
+- Consultation Duration
+- Leave
+- Qualified Services
+- Appointment Capacity
+
+## Doctor Leave
+
+Doctor submits leave request → Admin reviews → Approved leave blocks availability → Affected appointments are identified → Patients receive notifications → Alternative schedules or qualified Doctors are offered.
+
+Do not silently change confirmed appointments without the appropriate workflow.
+
+---
+
+# 17. MANDATORY STAFF TWO-FACTOR AUTHENTICATION
+
+Require authenticator-app TOTP for all staff roles.
+
+Implement:
+
+- Secure enrollment
+- Authenticator QR setup
+- TOTP challenge
+- Backend MFA enforcement
+- Secure recovery method
+- Login attempt controls
+- Session timeout
+- Sensitive-action reauthentication
+- Security audit history
+
+Patients may use optional MFA.
+
+Never use paid SMS OTP.
+
+Do not allow staff dashboard access until the required authentication assurance level is satisfied.
+
+---
+
+# 18. FREE NOTIFICATION SYSTEM
+
+**Do not integrate SMS services, SMS gateways, paid messaging APIs, or paid push notification providers.**
+
+Implement a database-backed in-app notification system.
+
+Every dashboard must have a notification bell and notification history.
+
+Required fields:
+
+- Notification title
+- Safe summary
+- Recipient
+- Related record
+- Timestamp
+- Read/unread status
+- View Details link
+- Duplicate-prevention identifier
+
+## Staff Notifications
+
+- Check-in → Nurse
+- Nurse Assessment Completed → Doctor
+- Lab Order Created → Lab Tech
+- Lab Result Released → Doctor
+- Prescription Finalized → Pharmacist
+- Clarification Required → Doctor
+- Appointment Changes → Relevant Staff
+- Security Events → Authorized Admin
+
+Marking a notification as read must not complete the underlying task.
+
+## Patient Notifications
+
+- Appointment Confirmed
+- Appointment Cancelled
+- Appointment Rescheduled
+- Appointment Reminder
+- Released Lab Result
+- Finalized Prescription
+- Available Consultation Summary
+- Receipt Available
+- Follow-up Recommendation
+
+## Dashboard Pop-ups
+
+Show small, nonintrusive pop-ups for important unread notifications while the patient is using the website.
+
+Include:
+
+- Short title
+- Privacy-safe message
+- View Details
+- Dismiss
+
+Closing a pop-up must not delete notification history.
+
+Do not repeatedly show the same notification on every refresh.
+
+Show relevant unread updates when patients next log in.
+
+## Appointment Reminders
+
+Generate in-app appointment reminders due 24 hours before confirmed appointments using Asia/Manila time.
+
+If the patient is online, display a reminder pop-up.
+
+If offline, persist the reminder and show it on their next login.
+
+If the appointment is changed or cancelled, update or invalidate reminders.
+
+When appointments are booked less than 24 hours ahead, apply an appropriate immediate or near-term reminder rule.
+
+Ensure due reminders can be materialized reliably through a server-side scheduler where available or through an authenticated due-reminder check on login and dashboard access.
+
+Do not claim background phone delivery when the website is closed.
+
+Optional browser notifications may be supported with user permission, but core functionality must not depend on them.
+
+---
+
+# 19. PATIENT MEDICAL RECORDS
+
+Maintain connected medical history using Patient ID and Visit ID.
+
+Organize:
+
+- Consultation History
+- Laboratory Results
+- Prescriptions
+- Follow-up Instructions
+- Released Documents
+
+Patient must see only their own authorized finalized or released documents.
+
+Implement working:
+
+- View
+- Download PDF
+- Print
+
+Required PDF documents:
+
+1. Consultation Summary
+2. Laboratory Results
+3. Prescription
+
+Use consistent SmartClinic branding and appropriate document identifiers, dates, signatory information, and release status.
+
+Do not generate fake medical signatures, license numbers, or clinical findings.
+
+Protect medical documents using secure access checks and private storage.
+
+---
+
+# 20. BILLING AND PAYMENT MANAGEMENT
+
+Create billing records linked to Visit IDs.
+
+Include:
+
+- Consultation Fees
+- Performed Laboratory Services
+- Dispensed Medicines
+- Other Authorized Service Charges
+- Total Amount
+- Approved Coverage
+- Remaining Balance
+- Payments
+- Payment Status
+
+Support:
+
+- Unpaid
+- Partially Paid
+- Paid
+- Authorized Adjustment or Refund
+
+Do not charge for unperformed tests or undispensed medicines.
+
+## Coverage Sources
+
+- Self-Pay
+- HMO / Health Card
+- PhilHealth
+
+Use manual coverage verification and recording.
+
+Do not claim live integration, automatic eligibility, or accreditation.
+
+Do not invent coverage discounts or benefit amounts.
+
+Provide View, Download, and Print for payment receipts or acknowledgments.
+
+Do not falsely label a generated document as a legally compliant official tax invoice.
+
+---
+
+# 21. CHECK-OUT AND FOLLOW-UP CARE
+
+Allow authorized staff to close a completed visit after appropriate clinical and administrative review.
+
+Pending laboratory or pharmacy tasks must remain trackable and must not automatically block check-out if the patient can appropriately leave.
+
+Doctor may create a follow-up recommendation.
+
+The Patient Dashboard must show:
+
+- Follow-up Recommendation
+- Suggested Date or Interval
+- Instructions
+- Book Follow-up Button
+
+A recommendation is not a confirmed booking.
+
+Patient must choose an eligible available appointment.
+
+Confirmed follow-up bookings must receive a new reference, QR code, and in-app reminder.
+
+Receptionists must be able to assist patients without online accounts.
+
+---
+
+# 22. PATIENT GUIDE CENTER
+
+Make Patient Guide visible on both the Public Website and Patient Dashboard.
+
+Create four sections.
+
+## A. HMO / Health Card Guidelines
+
+Include:
+
+- What HMO is
+- Health Card Information
+- Verification Requirements
+- Possible Letter of Authorization
+- Covered and Non-Covered Services
+- Remaining Patient Balances
+- Receptionist Assistance
+
+## B. PhilHealth Guidelines
+
+Include:
+
+- General Membership Information
+- Verification Information
+- Member Data Record
+- Current Official Primary Care Guidance
+- Benefit Information
+- Provider Accreditation Requirements
+- Official PhilHealth References
+
+Do not claim SmartClinic is PhilHealth-accredited.
+
+## C. Privacy and Transparency
+
+Include:
+
+- Personal Data Collection
+- Purpose of Processing
+- Authorized Medical Record Access
+- Privacy Rights
+- Data Retention
+- Security Practices
+- Data Access and Correction Requests
+- Predictive Analytics Data Usage
+
+Describe only actual implemented practices.
+
+## D. Clinic Patient Guides
+
+Include:
+
+- Registration
+- Login
+- Booking an Appointment
+- Selecting Available Dates and Times
+- QR Check-in
+- Walk-in Visits
+- Returning Patient Records
+- Cancellation and Rescheduling
+- Medical Records
+- PDF Download and Printing
+- Billing
+- Follow-up
+- In-App Notifications
+
+Allow Admin to update and publish Patient Guides with Last Updated information.
+
+---
+
+# 23. PREDICTIVE ANALYTICS ENGINE
+
+**This is a major capstone feature and must involve real forecasting calculations, not just historical graphs.**
+
+## 23.1 Available Historical Data
+
+The project owner has approximately 50–200 consultation records from evaluator testing.
+
+Available fields include:
+
+- Consultation Date
+- Patient ID
+- Consultation Status
+- Chief Complaint
+- Appointment Type: Online or Walk-in
+- Doctor's Diagnosis
+
+The entered dates cover approximately 7–12 months.
+
+However, these records are evaluator-generated testing data and must not be represented as verified operational clinic history.
+
+**IMPORTANT FOR THIS NEW PROJECT:** The historical records are not automatically available in a fresh database.
+
+Implement a secure, Admin-only CSV import workflow that allows the project owner to import the existing evaluator consultation records later.
+
+The importer must:
+
+- Validate required columns and date formats.
+- Report invalid or duplicate records.
+- Preserve source provenance.
+- Assign safe internal identifiers for imported records.
+- Preserve the original evaluator data without turning it into genuine patient encounters.
+- Avoid creating real patient portal accounts from historical CSV records.
+- Never create fabricated historical data automatically.
+- Import the records only into the Demonstration dataset.
+
+Until data is imported, show a clear empty state.
+
+Do not populate the dashboard with invented patient histories or fake forecasts.
+
+## 23.2 Two Strictly Separate Modes
+
+### Demonstration Mode
+
+Use only imported evaluator testing records.
+
+Label clearly:
+
+**DEMONSTRATION MODE — EVALUATOR TEST DATA — NOT VALIDATED FOR REAL CLINIC DEMAND**
+
+This mode demonstrates the technical forecasting system.
+
+### Operational Mode
+
+Use only genuine operational consultations created by the new SmartClinic system.
+
+If insufficient verified data exists, display:
+
+**Insufficient Verified Historical Data for Operational Forecasting**
+
+Never silently combine evaluator testing records and real operational records.
+
+Maintain separate datasets, forecast runs, model metadata, and provenance.
+
+## 23.3 Forecast Types
+
+Create:
+
+1. Daily Patient Visit Forecast
+2. Weekly Patient Visit Forecast — Primary
+3. Monthly Patient Visit Forecast — Exploratory
+4. Chief Complaint-Based Forecast — Only if enough data
+
+Complaint categories may include:
+
+- Fever
+- Cough
+- Headache
+- Stomach Pain
+- Other Complaints
+
+Use standardized primary complaint categories.
+
+Separate reported symptoms from Doctor diagnoses.
+
+Do not implement individual patient disease prediction or unsupported outbreak predictions.
+
+## 23.4 Forecasting Methods
+
+Implement explainable statistical forecasting:
+
+- Recent-Period Moving Average
+- Simple Exponential Smoothing
+
+Compare against appropriate simple baselines where feasible.
+
+Use chronological validation rather than random data splitting.
+
+Do not use random numbers or hardcoded predicted patient visits.
+
+Weekly forecasting should be prioritized for the limited dataset.
+
+For categories with too few observations, display historical trends or an insufficient-data message.
+
+## 23.5 Data Processing
+
+Implement:
+
+- Completed consultation filtering
+- Consultation/Visit ID deduplication
+- Date validation
+- Daily, weekly, monthly aggregation
+- Primary complaint categorization
+- Separation of online and walk-in historical trends
+- Separation of unique patients and total visits
+- Missing-period handling
+- Dataset provenance validation
+
+Treat actual completed consultations separately from appointments, registrations, and cancellations.
+
+## 23.6 Model Evaluation
+
+Where supported by the available data, show:
+
+- Model Name
+- Dataset Mode
+- Training Period
+- Forecast Date
+- Forecast Horizon
+- Mean Absolute Error
+- Actual vs Predicted
+- Forecast Status
+- Data Coverage
+- Appropriate Uncertainty Information
+
+If a model cannot be credibly evaluated, display the limitation rather than fake accuracy.
+
+Evaluator-derived technical backtesting is not proof of real-world forecasting accuracy.
+
+## 23.7 Admin Analytics Dashboard
+
+Include:
+
+- Historical Consultation Trends
+- Daily Forecast
+- Weekly Forecast
+- Monthly Forecast
+- Complaint Forecast
+- Online vs Walk-in Trends
+- Actual vs Predicted Chart
+- Model Comparison
+- Forecast Accuracy Information
+- Demonstration / Operational Mode Selector
+- Healthcare Management Insights
+
+Only authorized users may access relevant forecasting data.
+
+Use aggregated results without exposing unnecessary personal medical information.
+
+## 23.8 Operational Insights
+
+Provide cautious operational suggestions, such as:
+
+- Review available Doctor capacity for forecasted high-demand weeks.
+- Review Nurse workload.
+- Monitor recurring consultation complaints.
+- Compare appointment attendance with completed visits.
+- Consider adjusting appointment availability based on verified trends.
+
+Do not automatically modify clinic schedules based on unvalidated forecasts.
+
+---
+
+# 24. DATABASE DESIGN
+
+Create a new relational PostgreSQL schema.
+
+Include appropriate tables for:
+
+- User Profiles
+- Roles and Permissions
+- Patients
+- Portal Account Links
+- Staff
+- Doctor Schedules
+- Leave Requests
+- Services
+- Appointments
+- QR Tokens
+- Visits
+- Queue Entries
+- Nursing Assessments
+- Vital Signs
+- Consultations
+- Diagnoses
+- Laboratory Orders
+- Laboratory Results
+- Prescriptions
+- Prescription Items
+- Medicine Inventory
+- Dispensing
+- Billing
+- Billing Items
+- Coverage Reviews
+- Payments
+- Documents
+- Notifications
+- Appointment Reminders
+- Follow-up Recommendations
+- Patient Guides
+- Evaluator Demonstration Imports
+- Data Provenance
+- Forecast Runs
+- Forecast Results
+- Audit Logs
+
+Use proper:
+
+- Foreign Keys
+- Unique Constraints
+- Database Transactions
+- Secure Authorization Policies
+- Indexes
+- Created and Updated Timestamps
+- Status History
+- Audit Tracking
+
+Do not create SMS-related tables or paid-messaging dependencies.
+
+Do not put patient medical information in browser local storage as the system of record.
+
+---
+
+# 25. MOBILE-RESPONSIVE REQUIREMENTS
+
+Make every interface responsive.
+
+Support:
+
+- Android Chrome
+- iPhone Safari
+- Tablets
+- Desktop Chrome
+- Microsoft Edge
+- Firefox
+
+Requirements:
+
+- Mobile-friendly navigation
+- Touch-friendly controls
+- Readable forms
+- Responsive calendar
+- Real available time-slot selection
+- Appointment QR display
+- Mobile camera QR scanner
+- Responsive clinical forms
+- Adaptive tables
+- PDF View, Download, and Print
+- Responsive charts
+- Notification bell
+- Nonintrusive pop-ups
+- Accessible input labels
+- Clear validation and error states
+
+Patient-facing screens should prioritize mobile usability.
+
+Staff dashboards must also remain functional on mobile and tablet, while supporting efficient desktop workflows.
+
+Do not build a separate Android or iOS app.
+
+---
+
+# 26. SECURITY AND PRIVACY
+
+Implement:
+
+- Secure Authentication
+- Mandatory Staff TOTP MFA
+- Role-Based Authorization
+- Database Row Level Security
+- Server-side Validation
+- Private Medical Record Access
+- Secure File Storage
+- Secure Session Handling
+- Audit Logs
+- Protected Patient Account Linking
+- Least-Privilege Access
+- Safe Error Handling
+- Prevention of Unauthorized Cross-Role Access
+- Strict Separation of Evaluator and Operational Data
+
+Do not include secret keys in the GitHub repository.
+
+Do not use actual confidential patient records in a public demonstration without appropriate authorization and safeguards.
+
+Do not falsely claim complete legal compliance, accreditation, or security certification.
+
+---
+
+# 27. GITHUB AND DEPLOYMENT
+
+Prepare this new SmartClinic project for GitHub.
+
+Include:
+
+- Clean repository structure
+- `.gitignore`
+- `.env.example`
+- README
+- Database migration scripts
+- Setup documentation
+- Development commands
+- Production build commands
+- Deployment configuration
+
+Use a private GitHub repository during development when appropriate.
+
+Prepare hosting for Vercel if the chosen frontend and backend architecture is compatible.
+
+If a persistent Node.js backend requires another service, use a compatible hosting arrangement and explain the free-tier limitations.
+
+Connect the application to Supabase securely.
+
+Document required environment variables and authentication redirect settings.
+
+Do not require paid SMS services or subscriptions.
+
+---
+
+# 28. TESTING REQUIREMENTS
+
+Implement or provide meaningful verification for:
+
+1. New Patient Registration
+2. Staff Account Setup
+3. Mandatory TOTP Authentication
+4. Correct Role-Based Routing
+5. Patient Record Security
+6. Existing Walk-in Record Linking
+7. Doctor Schedule Availability
+8. Specific Doctor Booking
+9. Any Available Doctor Booking
+10. Double-Booking Prevention
+11. Cancellation and Rescheduling
+12. QR Code Check-in
+13. Walk-in Registration
+14. Unified Clinical Queue
+15. Nurse-to-Doctor Handoff
+16. Doctor Consultation
+17. Laboratory Order and Result Workflow
+18. Prescription and Dispensing Workflow
+19. Medical PDF View, Download, and Print
+20. Billing and Coverage
+21. Notifications and Pop-ups
+22. In-App Appointment Reminders
+23. Doctor Leave Management
+24. Follow-up Booking
+25. CSV Evaluator Import
+26. Demonstration vs Operational Data Separation
+27. Working Forecast Calculations
+28. Forecast Accuracy and Insufficient-Data Handling
+29. Responsive Mobile Functionality
+30. GitHub and Production Build Configuration
+
+Use isolated software test fixtures if needed for automated testing, but never present them as real patient history or genuine clinic forecasts.
+
+Do not mark a feature as complete unless its expected operations have been implemented and verified.
+
+---
+
+# 29. DEVELOPMENT PHASES
+
+Build this new project using the following sequence.
+
+### Phase 1 — Initial Project Foundation
+
+Create the React project, backend architecture, Supabase database schema, authentication, role permissions, and responsive layouts.
+
+### Phase 2 — Public Website and Patient Portal
+
+Create the public website, patient registration, patient dashboard, record linking, appointment booking, date/time availability, and QR codes.
+
+### Phase 3 — Staff Dashboards
+
+Implement Receptionist, Nurse, Doctor, Lab Tech, Pharmacist, and Admin Dashboards.
+
+Connect all clinical workflows and the unified queue.
+
+### Phase 4 — Additional Core Modules
+
+Implement billing, coverage management, medical documents, Doctor schedules, leave management, Patient Guide, check-out, and follow-up.
+
+### Phase 5 — Free Notifications
+
+Implement notification centers, realtime updates, dashboard pop-ups, and 24-hour in-app reminders.
+
+No SMS gateway or paid notification service.
+
+### Phase 6 — Predictive Analytics
+
+Implement evaluator CSV import, separate data modes, actual statistical forecasting algorithms, chronological evaluation, and the Admin Analytics Dashboard.
+
+### Phase 7 — Quality Assurance and Deployment
+
+Test all workflows, database security, mobile responsiveness, production build, GitHub integration, and deployment configuration.
+
+Build components incrementally without breaking completed functionality.
+
+Maintain a clear implementation checklist.
+
+---
+
+# 30. NON-NEGOTIABLE REQUIREMENTS
+
+1. **CREATE A COMPLETELY NEW SMARTCLINIC APPLICATION FROM SCRATCH.**
+2. Do not attempt to import, modify, or depend on an existing SmartClinic codebase.
+3. Create a new secure database schema.
+4. Support all seven user roles.
+5. Separate the Public Website, Patient Portal, and Staff Portal.
+6. Connect all roles through one backend and database.
+7. Require TOTP two-factor authentication for all staff.
+8. Support patients without online accounts.
+9. Maintain permanent Patient IDs.
+10. Securely link eligible previous walk-in histories.
+11. Show actual available booking dates and time slots.
+12. Support Specific Doctor and Any Available Doctor.
+13. Prevent appointment double booking.
+14. Generate secure appointment QR codes.
+15. Support walk-ins and a unified clinical queue.
+16. Connect Receptionist, Nurse, Doctor, Laboratory, and Pharmacy workflows.
+17. Allow secure medical document viewing, downloading, and printing.
+18. Include Billing, HMO, and PhilHealth guidance without fake external integrations.
+19. Use free in-app notifications, dashboard pop-ups, and appointment reminders.
+20. **DO NOT INCLUDE SMS SERVICE, SMS OTP, OR PAID MESSAGING.**
+21. Include a Patient Guide on both public and patient-facing interfaces.
+22. Build actual predictive forecasting algorithms.
+23. Support importing the project owner's evaluator records later into a separate demonstration dataset.
+24. Do not fabricate historical consultations, patient records, or forecast accuracy.
+25. Separate demonstration and operational data.
+26. Do not include branches, Emergency Contact, or Emergency Department modules.
+27. Make the entire website mobile-responsive.
+28. Prepare GitHub connectivity and compatible free-tier deployment.
+29. Make all essential buttons, forms, and workflows functional.
+30. Never pretend a module or external integration works when it has not been verified.
+
+---
+
+# 31. EXPECTED FINAL DELIVERABLE
+
+Build a complete, connected SmartClinic web application with:
+
+- Public Website
+- Patient Portal
+- Six Staff Dashboards
+- New PostgreSQL Database
+- Secure Authentication
+- Mandatory Staff 2FA
+- Patient Registration and Record Linking
+- Appointment Booking
+- Real Date and Time Availability
+- Appointment QR Codes
+- Walk-in Registration
+- Unified Patient Queue
+- Nurse Assessments
+- Doctor Consultations
+- Laboratory Management
+- Pharmacy and Medicine Inventory
+- Billing and Coverage Management
+- Medical Records and PDFs
+- Free In-App Notifications
+- Appointment Reminders
+- Patient Guide
+- Doctor Schedule and Leave Management
+- Working Predictive Analytics Engine
+- Strict Evaluator and Operational Data Separation
+- Mobile and Desktop Responsive Layouts
+- GitHub-Ready Source Code
+- Compatible Deployment Instructions
+
+This must be a functional full-stack application that can support a realistic outpatient clinic workflow.
+
+Start by creating the new project architecture, database design, authentication configuration, and responsive interface foundation.
+
+Then implement the remaining modules according to the development phases.
+
+When external services require configuration, provide the required setup and clearly identify what is configured versus what remains pending.
+
+Do not invent patient information or claim unsupported functionality.
+
+**BEGIN BUILDING THE NEW SMARTCLINIC WEB APPLICATION FROM SCRATCH.**

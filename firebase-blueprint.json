@@ -1,0 +1,607 @@
+{
+  "entities": {
+    "AdminMarker": {
+      "title": "AdminMarker",
+      "description": "Trusted marker document granting Administrator role verification.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 160 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "createdAt", "updatedAt"]
+    },
+    "ClinicRoster": {
+      "title": "ClinicRoster",
+      "description": "Bounded clinic staff UID roster used for zero-get secure list filtering and bootstrap state.",
+      "type": "object",
+      "properties": {
+        "bootstrappedAdminUid": { "type": "string", "maxLength": 128 },
+        "adminUids": { "type": "array" },
+        "doctorUids": { "type": "array" },
+        "nurseUids": { "type": "array" },
+        "receptionistUids": { "type": "array" },
+        "labUids": { "type": "array" },
+        "pharmacistUids": { "type": "array" },
+        "allStaffUids": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "bootstrappedAdminUid",
+        "adminUids",
+        "doctorUids",
+        "nurseUids",
+        "receptionistUids",
+        "labUids",
+        "pharmacistUids",
+        "allStaffUids",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "StaffAccount": {
+      "title": "StaffAccount",
+      "description": "Authenticated clinic staff account with server-encrypted TOTP MFA secret.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 160 },
+        "fullName": { "type": "string", "maxLength": 120 },
+        "role": {
+          "type": "string",
+          "enum": ["receptionist", "nurse", "doctor", "laboratory", "pharmacist", "admin"]
+        },
+        "department": { "type": "string", "maxLength": 80 },
+        "specialty": { "type": "string", "maxLength": 100 },
+        "titleDisplay": { "type": "string", "maxLength": 100 },
+        "active": { "type": "boolean" },
+        "mfaEnrolled": { "type": "boolean" },
+        "mfaEncryptedSecret": { "type": "string", "maxLength": 512 },
+        "mfaRecoveryHashes": { "type": "array" },
+        "authorizedViewerUids": { "type": "array" },
+        "createdIso": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid",
+        "email",
+        "fullName",
+        "role",
+        "department",
+        "specialty",
+        "titleDisplay",
+        "active",
+        "mfaEnrolled",
+        "mfaEncryptedSecret",
+        "mfaRecoveryHashes",
+        "authorizedViewerUids",
+        "createdIso",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "StaffInvitation": {
+      "title": "StaffInvitation",
+      "description": "Pre-authorized staff email role assignment created by Admin.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 160 },
+        "fullName": { "type": "string", "maxLength": 120 },
+        "role": {
+          "type": "string",
+          "enum": ["receptionist", "nurse", "doctor", "laboratory", "pharmacist", "admin"]
+        },
+        "department": { "type": "string", "maxLength": 80 },
+        "specialty": { "type": "string", "maxLength": 100 },
+        "titleDisplay": { "type": "string", "maxLength": 100 },
+        "status": { "type": "string", "enum": ["Pending Enrollment", "Claimed", "Revoked"] },
+        "invitedByUid": { "type": "string", "maxLength": 128 },
+        "authorizedViewerUids": { "type": "array" },
+        "createdIso": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "email",
+        "fullName",
+        "role",
+        "department",
+        "specialty",
+        "titleDisplay",
+        "status",
+        "invitedByUid",
+        "authorizedViewerUids",
+        "createdIso",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PublicDoctorSchedule": {
+      "title": "PublicDoctorSchedule",
+      "description": "Publicly readable Doctor directory and outpatient schedule configuration.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "doctorUid": { "type": "string", "maxLength": 128 },
+        "doctorName": { "type": "string", "maxLength": 120 },
+        "specialty": { "type": "string", "maxLength": 100 },
+        "workdays": { "type": "array" },
+        "startTime": { "type": "string", "maxLength": 10 },
+        "endTime": { "type": "string", "maxLength": 10 },
+        "breakStart": { "type": "string", "maxLength": 10 },
+        "breakEnd": { "type": "string", "maxLength": 10 },
+        "consultationDurationMinutes": { "type": "number" },
+        "slotCapacity": { "type": "number" },
+        "qualifiedServiceIds": { "type": "array" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "doctorUid",
+        "doctorName",
+        "specialty",
+        "workdays",
+        "startTime",
+        "endTime",
+        "breakStart",
+        "breakEnd",
+        "consultationDurationMinutes",
+        "slotCapacity",
+        "qualifiedServiceIds",
+        "active",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ClinicService": {
+      "title": "ClinicService",
+      "description": "Outpatient consultation or diagnostic laboratory service definition.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "code": { "type": "string", "maxLength": 40 },
+        "name": { "type": "string", "maxLength": 120 },
+        "category": { "type": "string", "enum": ["Consultation", "Follow-up", "Laboratory"] },
+        "description": { "type": "string", "maxLength": 600 },
+        "durationMinutes": { "type": "number" },
+        "baseFeePhp": { "type": "number" },
+        "directlyBookable": { "type": "boolean" },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "code",
+        "name",
+        "category",
+        "description",
+        "durationMinutes",
+        "baseFeePhp",
+        "directlyBookable",
+        "active",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PatientGuideSectionItem": {
+      "title": "PatientGuideSectionItem",
+      "description": "Published HMO, PhilHealth, Privacy, or Clinic Patient Guide topic.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "sectionKey": { "type": "string", "enum": ["hmo", "philhealth", "privacy", "clinic_guides"] },
+        "sectionTitle": { "type": "string", "maxLength": 120 },
+        "topicTitle": { "type": "string", "maxLength": 160 },
+        "summary": { "type": "string", "maxLength": 1500 },
+        "bulletPoints": { "type": "array" },
+        "importantNotice": { "type": "string", "maxLength": 600 },
+        "lastUpdated": { "type": "string", "maxLength": 40 },
+        "updatedByName": { "type": "string", "maxLength": 120 },
+        "published": { "type": "boolean" },
+        "sortOrder": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "sectionKey",
+        "sectionTitle",
+        "topicTitle",
+        "summary",
+        "bulletPoints",
+        "importantNotice",
+        "lastUpdated",
+        "updatedByName",
+        "published",
+        "sortOrder",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PatientPortalAccount": {
+      "title": "PatientPortalAccount",
+      "description": "Isolated Patient Portal login profile.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "email": { "type": "string", "maxLength": 160 },
+        "fullName": { "type": "string", "maxLength": 120 },
+        "phone": { "type": "string", "maxLength": 40 },
+        "dateOfBirth": { "type": "string", "maxLength": 20 },
+        "sex": { "type": "string", "enum": ["Female", "Male", "Other", "Prefer not to say"] },
+        "linkedPatientId": { "type": "string", "maxLength": 64 },
+        "optionalMfaEnabled": { "type": "boolean" },
+        "optionalMfaEncryptedSecret": { "type": "string", "maxLength": 512 },
+        "createdIso": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "uid",
+        "email",
+        "fullName",
+        "phone",
+        "dateOfBirth",
+        "sex",
+        "linkedPatientId",
+        "optionalMfaEnabled",
+        "optionalMfaEncryptedSecret",
+        "createdIso",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ClinicalPatientRecord": {
+      "title": "ClinicalPatientRecord",
+      "description": "Permanent clinical patient master record keyed by permanent Patient ID.",
+      "type": "object",
+      "properties": {
+        "patientId": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "portalUserId": { "type": "string", "maxLength": 128 },
+        "fullName": { "type": "string", "maxLength": 120 },
+        "dateOfBirth": { "type": "string", "maxLength": 20 },
+        "sex": { "type": "string", "enum": ["Female", "Male", "Other", "Prefer not to say"] },
+        "phone": { "type": "string", "maxLength": 40 },
+        "email": { "type": "string", "maxLength": 160 },
+        "address": { "type": "string", "maxLength": 300 },
+        "allergies": { "type": "string", "maxLength": 500 },
+        "chronicConditions": { "type": "string", "maxLength": 500 },
+        "registrationSource": { "type": "string", "enum": ["Online Portal", "Walk-in Front Desk"] },
+        "authorizedViewerUids": { "type": "array" },
+        "createdIso": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "patientId",
+        "portalUserId",
+        "fullName",
+        "dateOfBirth",
+        "sex",
+        "phone",
+        "email",
+        "address",
+        "allergies",
+        "chronicConditions",
+        "registrationSource",
+        "authorizedViewerUids",
+        "createdIso",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "BookedSlot": {
+      "title": "BookedSlot",
+      "description": "Privacy-safe deterministic slot lock preventing double booking without exposing patient PII.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "doctorUid": { "type": "string", "maxLength": 128 },
+        "appointmentDate": { "type": "string", "maxLength": 16 },
+        "appointmentTime": { "type": "string", "maxLength": 10 },
+        "endTime": { "type": "string", "maxLength": 10 },
+        "durationMinutes": { "type": "number" },
+        "appointmentId": { "type": "string", "maxLength": 128 },
+        "portalUserId": { "type": "string", "maxLength": 128 },
+        "active": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "doctorUid",
+        "appointmentDate",
+        "appointmentTime",
+        "endTime",
+        "durationMinutes",
+        "appointmentId",
+        "portalUserId",
+        "active",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Appointment": {
+      "title": "Appointment",
+      "description": "Confirmed, rescheduled, or cancelled outpatient appointment with signed QR token.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "referenceNumber": { "type": "string", "maxLength": 64 },
+        "patientId": { "type": "string", "maxLength": 64 },
+        "portalUserId": { "type": "string", "maxLength": 128 },
+        "patientName": { "type": "string", "maxLength": 120 },
+        "serviceId": { "type": "string", "maxLength": 128 },
+        "serviceName": { "type": "string", "maxLength": 120 },
+        "bookingMode": { "type": "string", "enum": ["Specific Doctor", "Any Available Doctor"] },
+        "doctorUid": { "type": "string", "maxLength": 128 },
+        "doctorName": { "type": "string", "maxLength": 120 },
+        "appointmentDate": { "type": "string", "maxLength": 16 },
+        "appointmentTime": { "type": "string", "maxLength": 10 },
+        "endTime": { "type": "string", "maxLength": 10 },
+        "durationMinutes": { "type": "number" },
+        "status": {
+          "type": "string",
+          "enum": [
+            "Confirmed",
+            "Checked In",
+            "Completed",
+            "Cancelled",
+            "Rescheduled",
+            "Needs Clinic Reschedule",
+            "No Show"
+          ]
+        },
+        "qrToken": { "type": "string", "maxLength": 300 },
+        "qrStatus": { "type": "string", "enum": ["Active", "Used", "Invalidated", "Replaced"] },
+        "blockedReplacementDates": { "type": "array" },
+        "minReplacementDate": { "type": "string", "maxLength": 16 },
+        "previousAppointmentId": { "type": "string", "maxLength": 128 },
+        "followUpRecommendationId": { "type": "string", "maxLength": 128 },
+        "reasonForVisit": { "type": "string", "maxLength": 500 },
+        "checkedInAt": { "type": "string", "maxLength": 40 },
+        "visitId": { "type": "string", "maxLength": 64 },
+        "statusHistory": { "type": "array" },
+        "authorizedViewerUids": { "type": "array" },
+        "createdIso": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "referenceNumber",
+        "patientId",
+        "portalUserId",
+        "patientName",
+        "serviceId",
+        "serviceName",
+        "bookingMode",
+        "doctorUid",
+        "doctorName",
+        "appointmentDate",
+        "appointmentTime",
+        "endTime",
+        "durationMinutes",
+        "status",
+        "qrToken",
+        "qrStatus",
+        "blockedReplacementDates",
+        "minReplacementDate",
+        "previousAppointmentId",
+        "followUpRecommendationId",
+        "reasonForVisit",
+        "checkedInAt",
+        "visitId",
+        "statusHistory",
+        "authorizedViewerUids",
+        "createdIso",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "VisitEncounter": {
+      "title": "VisitEncounter",
+      "description": "Unified clinical queue encounter combining checked-in appointments and walk-ins.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 64, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "visitId": { "type": "string", "maxLength": 64 },
+        "queueNumber": { "type": "string", "maxLength": 24 },
+        "patientId": { "type": "string", "maxLength": 64 },
+        "portalUserId": { "type": "string", "maxLength": 128 },
+        "patientName": { "type": "string", "maxLength": 120 },
+        "appointmentId": { "type": "string", "maxLength": 128 },
+        "appointmentType": { "type": "string", "enum": ["Online", "Walk-in"] },
+        "serviceName": { "type": "string", "maxLength": 120 },
+        "doctorUid": { "type": "string", "maxLength": 128 },
+        "doctorName": { "type": "string", "maxLength": 120 },
+        "scheduledTime": { "type": "string", "maxLength": 16 },
+        "arrivalTime": { "type": "string", "maxLength": 40 },
+        "visitDate": { "type": "string", "maxLength": 16 },
+        "queueStatus": {
+          "type": "string",
+          "enum": [
+            "Checked In",
+            "Waiting for Nurse",
+            "In Assessment",
+            "Ready for Doctor",
+            "In Consultation",
+            "Consultation Completed",
+            "Checked Out"
+          ]
+        },
+        "clinicalPriority": { "type": "string", "enum": ["Routine", "Priority", "Urgent Referral"] },
+        "triageReferralNote": { "type": "string", "maxLength": 500 },
+        "checkedOutAt": { "type": "string", "maxLength": 40 },
+        "authorizedViewerUids": { "type": "array" },
+        "createdIso": { "type": "string", "maxLength": 40 },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": [
+        "id",
+        "visitId",
+        "queueNumber",
+        "patientId",
+        "portalUserId",
+        "patientName",
+        "appointmentId",
+        "appointmentType",
+        "serviceName",
+        "doctorUid",
+        "doctorName",
+        "scheduledTime",
+        "arrivalTime",
+        "visitDate",
+        "queueStatus",
+        "clinicalPriority",
+        "triageReferralNote",
+        "checkedOutAt",
+        "authorizedViewerUids",
+        "createdIso",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "ClinicalRecordEnvelope": {
+      "title": "ClinicalRecordEnvelope",
+      "description": "Typed clinical workflow record for nursing assessments, consultations, lab orders, prescriptions, billing, follow-ups, link requests, leaves, notifications, reminders, and analytics.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128, "pattern": "^[a-zA-Z0-9_\\-]+$" },
+        "portalUserId": { "type": "string", "maxLength": 128 },
+        "patientVisible": { "type": "boolean" },
+        "authorizedViewerUids": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "authorizedViewerUids", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/admins/{adminUid}": {
+      "schema": "AdminMarker",
+      "description": "Administrator RBAC identity registry."
+    },
+    "/clinic_roster/{docId}": {
+      "schema": "ClinicRoster",
+      "description": "Bounded clinic staff UID roster for zero-get secure list filtering."
+    },
+    "/staff_accounts/{staffUid}": {
+      "schema": "StaffAccount",
+      "description": "Staff profile and encrypted TOTP MFA secrets."
+    },
+    "/staff_invitations/{inviteId}": {
+      "schema": "StaffInvitation",
+      "description": "Admin-issued staff role invitations."
+    },
+    "/public_doctors/{doctorUid}": {
+      "schema": "PublicDoctorSchedule",
+      "description": "Public doctor directory and outpatient schedules."
+    },
+    "/clinic_services/{serviceId}": {
+      "schema": "ClinicService",
+      "description": "Outpatient consultation and diagnostic services catalog."
+    },
+    "/patient_guides/{guideId}": {
+      "schema": "PatientGuideSectionItem",
+      "description": "Public and portal Patient Guide Center articles."
+    },
+    "/patient_accounts/{userId}": {
+      "schema": "PatientPortalAccount",
+      "description": "Private Patient Portal account profiles."
+    },
+    "/patients/{patientId}": {
+      "schema": "ClinicalPatientRecord",
+      "description": "Permanent clinical patient master records."
+    },
+    "/booked_slots/{slotId}": {
+      "schema": "BookedSlot",
+      "description": "Deterministic slot reservation locks preventing double booking."
+    },
+    "/appointments/{appointmentId}": {
+      "schema": "Appointment",
+      "description": "Outpatient appointment bookings and QR tokens."
+    },
+    "/visits/{visitId}": {
+      "schema": "VisitEncounter",
+      "description": "Unified outpatient queue encounters."
+    },
+    "/nursing_assessments/{visitId}": {
+      "schema": "ClinicalRecordEnvelope",
+      "description": "Confidential nurse vital signs and initial assessments."
+    },
+    "/consultations/{visitId}": {
+      "schema": "ClinicalRecordEnvelope",
+      "description": "Confidential doctor consultation notes, diagnoses, and amendments."
+    },
+    "/lab_orders/{orderId}": {
+      "schema": "ClinicalRecordEnvelope",
+      "description": "Laboratory requests, specimen tracking, and verified released results."
+    },
+    "/prescriptions/{rxId}": {
+      "schema": "ClinicalRecordEnvelope",
+      "description": "Doctor prescriptions and pharmacy dispensing records."
+    },
+    "/medicine_inventory/{medId}": {
+      "schema": "ClinicalRecordEnvelope",
+      "description": "Pharmacy medicine stock and batch expiry inventory."
+    },
+    "/billings/{visitId}": {
+      "schema": "ClinicalRecordEnvelope",
+      "description": "Visit statements, manual HMO/PhilHealth coverage verification, and payments."
+    },
+    "/follow_ups/{followUpId}": {
+      "schema": "ClinicalRecordEnvelope",
+      "description": "Doctor follow-up care recommendations."
+    },
+    "/link_requests/{requestId}": {
+      "schema": "ClinicalRecordEnvelope",
+      "description": "Walk-in patient record linking verification requests."
+    },
+    "/leave_requests/{leaveId}": {
+      "schema": "ClinicalRecordEnvelope",
+      "description": "Doctor leave requests and admin review decisions."
+    },
+    "/approved_leaves/{leaveId}": {
+      "schema": "ClinicalRecordEnvelope",
+      "description": "Privacy-safe approved leave date blocks for availability calculation."
+    },
+    "/notifications/{notifId}": {
+      "schema": "ClinicalRecordEnvelope",
+      "description": "In-app notifications per recipient."
+    },
+    "/appointment_reminders/{reminderId}": {
+      "schema": "ClinicalRecordEnvelope",
+      "description": "24-hour Asia/Manila appointment reminder state."
+    },
+    "/evaluator_imports/{batchId}": {
+      "schema": "ClinicalRecordEnvelope",
+      "description": "Admin-only CSV evaluator import batch provenance metadata."
+    },
+    "/evaluator_records/{recordId}": {
+      "schema": "ClinicalRecordEnvelope",
+      "description": "Isolated Demonstration Mode evaluator consultation records."
+    },
+    "/operational_analytics_events/{visitId}": {
+      "schema": "ClinicalRecordEnvelope",
+      "description": "De-identified completed operational consultation summaries for Admin forecasting."
+    },
+    "/coverage_settings/{docId}": {
+      "schema": "ClinicalRecordEnvelope",
+      "description": "Clinic HMO and PhilHealth manual verification settings."
+    },
+    "/audit_logs/{logId}": {
+      "schema": "ClinicalRecordEnvelope",
+      "description": "Immutable security and clinical audit trail."
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "SmartClinic",
+  "description": "Role-based outpatient clinic management web application integrating real-time scheduling, QR check-in, unified clinical queues, mandatory staff TOTP 2FA, and statistical predictive analytics.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
